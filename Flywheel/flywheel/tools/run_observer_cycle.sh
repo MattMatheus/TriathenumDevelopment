@@ -7,6 +7,7 @@ source "$script_dir/lib/config.sh"
 root_dir="$(flywheel_repo_root)"
 observer_dir="$(flywheel_path paths.artifacts.observer)"
 template_path="$(flywheel_template_path observer_report)"
+harness_rel="$(flywheel_repo_relative_path "$(flywheel_harness_dir)")"
 
 cycle_id=""
 story_path=""
@@ -14,7 +15,7 @@ out_path=""
 
 usage() {
   cat <<USAGE
-usage: flywheel/tools/run_observer_cycle.sh --cycle-id <id> [--story <path>] [--output <path>]
+usage: ${harness_rel}/tools/run_observer_cycle.sh --cycle-id <id> [--story <path>] [--output <path>]
 USAGE
 }
 

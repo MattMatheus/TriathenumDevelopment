@@ -7,8 +7,46 @@ flywheel_repo_root() {
   git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null || (cd "$script_dir/../../.." && pwd)
 }
 
+flywheel_harness_dir() {
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  cd "$script_dir/../.." && pwd
+}
+
 flywheel_config_file() {
-  printf '%s/flywheel.yaml' "$(flywheel_repo_root)"
+  local repo_root harness_dir harness_parent
+  repo_root="$(flywheel_repo_root)"
+  harness_dir="$(flywheel_harness_dir)"
+  harness_parent="$(cd "$harness_dir/.." && pwd)"
+
+  if [[ -f "$repo_root/flywheel.yaml" ]]; then
+    printf '%s/flywheel.yaml' "$repo_root"
+    return 0
+  fi
+
+  if [[ -f "$harness_parent/flywheel.yaml" ]]; then
+    printf '%s/flywheel.yaml' "$harness_parent"
+    return 0
+  fi
+
+  printf '%s/flywheel.yaml' "$repo_root"
+}
+
+flywheel_config_dir() {
+  dirname "$(flywheel_config_file)"
+}
+
+flywheel_repo_relative_path() {
+  local path="$1"
+  local root
+  root="$(flywheel_repo_root)"
+  if [[ "$path" == "$root" ]]; then
+    printf '.\n'
+  elif [[ "$path" == "$root"/* ]]; then
+    printf '%s\n' "${path#"$root"/}"
+  else
+    printf '%s\n' "$path"
+  fi
 }
 
 flywheel_config_get() {
@@ -54,10 +92,10 @@ flywheel_config_get_optional() {
 
 flywheel_path() {
   local key="$1"
-  local root value
-  root="$(flywheel_repo_root)"
+  local base_dir value
+  base_dir="$(flywheel_config_dir)"
   value="$(flywheel_config_get "$key")"
-  printf '%s/%s' "$root" "$value"
+  printf '%s/%s' "$base_dir" "$value"
 }
 
 flywheel_template_path() {

@@ -13,7 +13,7 @@ Validate the top engineering story from the configured engineering QA lane.
 - handoff artifacts from engineering
 - QA rubric and state transition rules from `paths.process`
 - role contract for QA work when `features.role_selection` is enabled
-- if `integrations.artifact_workflow.enabled` is `true`, `flywheel/tools/artifact_workflow.sh qa --format json`
+- if `integrations.artifact_workflow.enabled` is `true`, the local harness `tools/artifact_workflow.sh qa --format json`
 
 ## Required Actions
 1. Review the story against its acceptance criteria.
@@ -26,7 +26,7 @@ Validate the top engineering story from the configured engineering QA lane.
    - move back to `paths.engineering.active` if blocking defects exist
 7. Run observer for the completed cycle.
 8. Create the cycle commit using `workflow.cycle_commit_format`.
-9. If the artifact workflow integration is enabled, review the stage entry and exit commands from `flywheel/tools/artifact_workflow.sh qa --format json` and use them when they improve artifact selection or cycle-closure durability.
+9. If the artifact workflow integration is enabled, review the stage entry and exit commands from the local harness `tools/artifact_workflow.sh qa --format json` output and use them when they improve artifact selection or cycle-closure durability.
    Example:
    Use `entry` to confirm the stage inputs you are validating, then use `exit` after the observer step when you want a durable cycle-closure manifest.
 

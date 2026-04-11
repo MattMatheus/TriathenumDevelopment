@@ -11,4 +11,6 @@ Each stage handoff should contain:
 
 Handoffs should be concise and sufficient for the next stage to proceed without rediscovering context.
 
+If a stage does not have a separate artifact surface in config, the backlog item itself may be the primary handoff artifact as long as it contains the required reviewable detail.
+
 If the optional artifact workflow integration is enabled, a stage may also emit a durable manifest that points at the handoff inputs instead of relying only on raw path references in prose.

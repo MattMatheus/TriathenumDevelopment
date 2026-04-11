@@ -12,7 +12,7 @@ Execute the top engineering story from the configured engineering active lane.
 - the top story in `paths.engineering.active`
 - process docs from `paths.process`
 - role contract for engineering work when `features.role_selection` is enabled
-- if `integrations.artifact_workflow.enabled` is `true`, `flywheel/tools/artifact_workflow.sh engineering --format json`
+- if `integrations.artifact_workflow.enabled` is `true`, the local harness `tools/artifact_workflow.sh engineering --format json`
 
 ## Required Actions
 1. Read and restate the selected story.
@@ -23,7 +23,7 @@ Execute the top engineering story from the configured engineering active lane.
 6. Prepare a handoff package with change summary, validation results, open risks, assumptions carried forward, and QA focus areas.
 7. Move the story to the configured engineering QA lane.
 8. Do not create the cycle commit yet.
-9. If the artifact workflow integration is enabled, review the stage entry and exit commands from `flywheel/tools/artifact_workflow.sh engineering --format json` and use them when they improve artifact selection or handoff durability.
+9. If the artifact workflow integration is enabled, review the stage entry and exit commands from the local harness `tools/artifact_workflow.sh engineering --format json` output and use them when they improve artifact selection or handoff durability.
    Example:
    Use `entry` to pull forward the latest ready planning context before implementation, and use `exit` only after validation and the QA handoff are complete.
 

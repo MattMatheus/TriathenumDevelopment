@@ -13,7 +13,7 @@ Refine backlog intake and maintain the configured active queues.
 - configured active lanes
 - process docs from `paths.process`
 - role contract for PM work when `features.role_selection` is enabled
-- if `integrations.artifact_workflow.enabled` is `true`, `flywheel/tools/artifact_workflow.sh pm --format json`
+- if `integrations.artifact_workflow.enabled` is `true`, the local harness `tools/artifact_workflow.sh pm --format json`
 
 ## Required Actions
 1. Review new intake items.
@@ -24,7 +24,7 @@ Refine backlog intake and maintain the configured active queues.
 6. Ensure stories remain bounded, testable, and traceable.
 7. Preserve explicit dependencies and risk notes when refining intake.
 8. Run observer if the PM cycle is being closed as a cycle.
-9. If the artifact workflow integration is enabled, review the stage entry and exit commands from `flywheel/tools/artifact_workflow.sh pm --format json` and use them when they improve artifact selection or durable handoff records.
+9. If the artifact workflow integration is enabled, review the stage entry and exit commands from the local harness `tools/artifact_workflow.sh pm --format json` output and use them when they improve artifact selection or durable handoff records.
 
 ## Required Output
 - refined story or bug artifacts

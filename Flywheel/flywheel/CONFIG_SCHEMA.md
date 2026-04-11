@@ -9,6 +9,8 @@
 
 ## Keys
 
+By default, `flywheel.yaml` sits next to the harness directory in either a self-contained root install or an embedded host-repo install. Configured paths are resolved relative to the directory containing `flywheel.yaml`.
+
 ### `version`
 - Schema version for future migrations.
 - First pass uses `1`.
@@ -82,10 +84,10 @@
 - Optional artifact-tool bridge for repos that want Flywheel to surface artifact selection and manifest commands without hard-coupling the harness to that tool.
 - `enabled`: when `true`, stage launch and observer tools print artifact-tool commands relevant to that stage.
 - `command`: shell command used to invoke the artifact tool, typically a wrapper such as `/Users/.../Tools/artifacts/flywheel-artifacts`.
-- `flywheel/tools/artifact_workflow.sh` supports `--format text|json` so wrappers can consume the integration hints without parsing human-oriented stage output.
+- the local harness `tools/artifact_workflow.sh` helper supports `--format text|json` so wrappers can consume the integration hints without parsing human-oriented stage output.
 
 ## First-Pass Constraints
-- All configured paths should be repo-relative.
+- All configured paths should be relative to the directory containing `flywheel.yaml`.
 - Flywheel should not assume a product-specific top-level directory.
 - Planning and PM remain first-class stages, but they must target configured artifact paths instead of project-specific research or roadmap directories.
 - Observer remains part of the core harness.
@@ -93,6 +95,7 @@
 
 ## Implementation Guidance
 - Tools should load `flywheel.yaml` before resolving any workflow paths.
+- Tools should resolve the Flywheel harness directory from their own location rather than assuming the harness lives at repo-root `flywheel/`.
 - Prompts and entry docs should reference logical artifact types, not hardcoded repo folders, unless those paths are provided by config.
 - If a feature is disabled, tools should degrade cleanly rather than require placeholder files.
 - Optional integrations should surface guidance or hooks only when explicitly enabled in config.

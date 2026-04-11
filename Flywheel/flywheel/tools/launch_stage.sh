@@ -6,10 +6,17 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/lib/config.sh"
 
 root_dir="$(flywheel_repo_root)"
+harness_dir="$(flywheel_harness_dir)"
+config_file="$(flywheel_config_file)"
 required_branch="$(flywheel_config_get workflow.required_branch)"
 prompts_dir="$(flywheel_path paths.prompts)"
 eng_active_dir="$(flywheel_path paths.engineering.active)"
 arch_active_dir="$(flywheel_path paths.architecture.active)"
+harness_rel="$(flywheel_repo_relative_path "$harness_dir")"
+config_rel="$(flywheel_repo_relative_path "$config_file")"
+prompts_rel="$(flywheel_repo_relative_path "$prompts_dir")"
+eng_active_rel="$(flywheel_repo_relative_path "$eng_active_dir")"
+arch_active_rel="$(flywheel_repo_relative_path "$arch_active_dir")"
 
 print_artifact_workflow() {
   local stage_name="$1"
@@ -61,6 +68,9 @@ case "$stage" in
   planning)
     cat <<EOF
 launch: ${prompts_dir}/planning.md
+config: ${config_rel}
+harness: ${harness_rel}
+prompts: ${prompts_rel}
 cycle: planning
 checklist:
   1) capture goals, constraints, risks, and assumptions
@@ -79,11 +89,15 @@ EOF
     rel_item="${top_item#"$root_dir"/}"
     cat <<EOF
 launch: ${prompts_dir}/architect.md
+config: ${config_rel}
+harness: ${harness_rel}
+prompts: ${prompts_rel}
+active_lane: ${arch_active_rel}
 cycle: architect
 story: ${rel_item}
 checklist:
   1) restate decision scope
-  2) update architecture artifacts
+  2) update the architecture story and any configured architecture artifacts
   3) prepare handoff
   4) move work to architecture qa
 EOF
@@ -98,6 +112,10 @@ EOF
     rel_item="${top_item#"$root_dir"/}"
     cat <<EOF
 launch: ${prompts_dir}/engineering.md
+config: ${config_rel}
+harness: ${harness_rel}
+prompts: ${prompts_rel}
+active_lane: ${eng_active_rel}
 cycle: engineering
 story: ${rel_item}
 checklist:
@@ -112,6 +130,9 @@ EOF
   qa)
     cat <<EOF
 launch: ${prompts_dir}/qa.md
+config: ${config_rel}
+harness: ${harness_rel}
+prompts: ${prompts_rel}
 cycle: qa
 checklist:
   1) validate the story in the engineering qa lane
@@ -125,6 +146,9 @@ EOF
   pm)
     cat <<EOF
 launch: ${prompts_dir}/pm.md
+config: ${config_rel}
+harness: ${harness_rel}
+prompts: ${prompts_rel}
 cycle: pm
 checklist:
   1) refine intake work
@@ -137,6 +161,10 @@ EOF
   cycle)
     cat <<EOF
 launch: ${prompts_dir}/cycle.md
+config: ${config_rel}
+harness: ${harness_rel}
+prompts: ${prompts_rel}
+engineering_active_lane: ${eng_active_rel}
 cycle: engineering+qa loop
 loop:
   - run engineering stage
@@ -149,7 +177,7 @@ EOF
     print_artifact_workflow cycle
     ;;
   *)
-    echo "usage: flywheel/tools/launch_stage.sh [planning|architect|engineering|qa|pm|cycle]" >&2
+    echo "usage: ${harness_rel}/tools/launch_stage.sh [planning|architect|engineering|qa|pm|cycle]" >&2
     exit 1
     ;;
 esac

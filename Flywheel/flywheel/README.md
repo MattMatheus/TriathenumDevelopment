@@ -16,25 +16,29 @@ The harness is intended to run either:
 - in a new repository with Flywheel-owned directories
 - inside an existing repository by mapping Flywheel paths in `flywheel.yaml`
 
+When Flywheel is embedded in a larger host repository, non-workflow directories may coexist alongside Flywheel-managed surfaces. In that setup, agents and operators should treat the configured Flywheel paths as authoritative for software-delivery workflow state and should not infer artifact placement from the rest of the repo layout.
+
 ## Start
-1. Review `flywheel.yaml`.
-2. Read `flywheel/HUMANS.md`.
-3. Read `flywheel/DEVELOPMENT_CYCLE.md`.
-4. Read the stage prompts, process docs, and templates.
+1. Review the local `flywheel.yaml`.
+2. Read the harness `HUMANS.md`.
+3. Read the harness `DEVELOPMENT_CYCLE.md`.
+4. Read the stage prompts, process docs, and templates resolved by config.
 5. Populate the configured prompt, role, process, template, and backlog paths.
-6. Run the harness tools from `flywheel/tools/` against the configured paths.
+6. Run the harness tools from the local harness `tools/` directory against the configured paths.
+
+The stage launcher should tell you which config file, harness directory, prompt directory, and active lane it resolved before you begin substantive work.
 
 ## Typical Use
 
 ### Add Flywheel To An Existing Repo
-1. Copy `flywheel.yaml` to the repo root.
-2. Copy the `flywheel/` directory into the repo.
+1. Place `flywheel.yaml` next to the harness directory you want to use.
+2. Copy the `flywheel/` harness directory into the repo.
 3. Keep the default local paths if you want a self-contained workflow.
 4. Edit `flywheel.yaml` only if you want Flywheel to point at existing repo directories.
-5. Run `./flywheel/tools/run_doc_tests.sh`.
+5. Run the local harness `tools/run_doc_tests.sh`.
 
 ### Example Remap For An Existing Repo
-If an existing project already has its own work directories, keep the Flywheel system under `flywheel/` and remap only the workflow-owned state:
+If an existing project already has its own work directories, keep the Flywheel system in a self-contained harness directory and remap only the workflow-owned state:
 
 ```yaml
 paths:
@@ -64,31 +68,42 @@ paths:
     archive: "work/architecture/archive"
 ```
 
-This keeps the harness system contained in `flywheel/` while allowing backlog state and generated artifacts to live in project-native locations.
+This keeps the harness system contained while allowing backlog state and generated artifacts to live in project-native locations.
+
+### Embedded Host Repo Pattern
+Some host repositories contain important non-workflow surfaces such as product source trees, datasets, or domain substrates that should remain separate from Flywheel delivery state.
+
+In that pattern:
+- Flywheel still owns workflow behavior and artifact placement through `flywheel.yaml`
+- planning notes still belong in `paths.artifacts.planning`
+- observer reports still belong in `paths.artifacts.observer`
+- architecture work belongs in the configured architecture backlog lanes unless the host repo explicitly defines additional architecture artifact locations
+- host-repo domain content may inform planning and design, but it does not implicitly become a Flywheel artifact surface
 
 ### Use Flywheel As A Self-Contained Local Workflow
-- backlog state lives under `flywheel/backlog/`
-- planning notes live under `flywheel/artifacts/planning/`
-- observer reports live under `flywheel/artifacts/observer/`
-- prompts, roles, process docs, and templates stay under `flywheel/`
-- tools run from `flywheel/tools/`
+- backlog state lives under the harness `backlog/`
+- planning notes live under the configured planning artifact path
+- observer reports live under the configured observer artifact path
+- prompts, roles, process docs, and templates stay under the harness directory
+- tools run from the harness `tools/` directory
 
 ## Operating Expectations
 - artifact readiness is explicit, not implied
 - handoffs record evidence, risks, and next-state recommendation
 - observer reports act as compact execution traces, not just end-of-cycle notes
 - risky or sensitive actions require explicit approval and recorded outcome
+- host-repo context does not override config-owned workflow locations
 
 ### Launch A Stage
-- `./flywheel/tools/launch_stage.sh planning`
-- `./flywheel/tools/launch_stage.sh architect`
-- `./flywheel/tools/launch_stage.sh engineering`
-- `./flywheel/tools/launch_stage.sh qa`
-- `./flywheel/tools/launch_stage.sh pm`
-- `./flywheel/tools/launch_stage.sh cycle`
+- `./<harness>/tools/launch_stage.sh planning`
+- `./<harness>/tools/launch_stage.sh architect`
+- `./<harness>/tools/launch_stage.sh engineering`
+- `./<harness>/tools/launch_stage.sh qa`
+- `./<harness>/tools/launch_stage.sh pm`
+- `./<harness>/tools/launch_stage.sh cycle`
 
 ### Close A Cycle
-- `./flywheel/tools/run_observer_cycle.sh --cycle-id <cycle-id>`
+- `./<harness>/tools/run_observer_cycle.sh --cycle-id <cycle-id>`
 
 ### Optional Artifact Workflow
 Flywheel can surface artifact-tool commands without making that tool part of the harness contract.
@@ -103,10 +118,10 @@ When enabled:
 
 ## Core Files
 - `flywheel.yaml`
-- `flywheel/CONFIG_SCHEMA.md`
-- `flywheel/HUMANS.md`
-- `flywheel/AGENTS.md`
-- `flywheel/DEVELOPMENT_CYCLE.md`
+- `<harness>/CONFIG_SCHEMA.md`
+- `<harness>/HUMANS.md`
+- `<harness>/AGENTS.md`
+- `<harness>/DEVELOPMENT_CYCLE.md`
 
 ## First-Pass Intent
 - Keep the workflow generic.

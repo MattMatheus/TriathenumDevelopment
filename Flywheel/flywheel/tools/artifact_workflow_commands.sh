@@ -2,14 +2,16 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/lib/config.sh"
 
 stage=""
 phase=""
 cycle_id=""
+harness_rel="$(flywheel_repo_relative_path "$(flywheel_harness_dir)")"
 
 usage() {
   cat <<USAGE
-usage: flywheel/tools/artifact_workflow_commands.sh --stage <planning|architect|engineering|qa|pm|cycle|observer> --phase <entry|exit> [--cycle-id <id>]
+usage: ${harness_rel}/tools/artifact_workflow_commands.sh --stage <planning|architect|engineering|qa|pm|cycle|observer> --phase <entry|exit> [--cycle-id <id>]
 USAGE
 }
 

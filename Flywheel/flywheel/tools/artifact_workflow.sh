@@ -7,10 +7,11 @@ source "$script_dir/lib/config.sh"
 stage="${1:-}"
 cycle_id=""
 format="text"
+harness_rel="$(flywheel_repo_relative_path "$(flywheel_harness_dir)")"
 
 usage() {
   cat <<USAGE
-usage: flywheel/tools/artifact_workflow.sh <planning|architect|engineering|qa|pm|cycle|observer> [--cycle-id <id>] [--format text|json]
+usage: ${harness_rel}/tools/artifact_workflow.sh <planning|architect|engineering|qa|pm|cycle|observer> [--cycle-id <id>] [--format text|json]
 USAGE
 }
 

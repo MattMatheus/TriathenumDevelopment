@@ -22,7 +22,8 @@ Flywheel runs a staged workflow with explicit queue movement and cycle closure.
 
 ### Architect
 - Execute architecture decision stories.
-- Produce decision artifacts with alternatives, tradeoffs, and operational impact.
+- Produce reviewable decision output with alternatives, tradeoffs, and operational impact.
+- When no separate architecture artifact location is configured, keep that decision output in the architecture story itself as it moves through the configured architecture lanes.
 - Produce follow-on implementation paths.
 - Do not replace implementation work with architecture work.
 
@@ -52,10 +53,11 @@ Flywheel runs a staged workflow with explicit queue movement and cycle closure.
 - Required branch is set by `workflow.required_branch`.
 - Commit format is set by `workflow.cycle_commit_format`.
 - Workflow locations are resolved from `flywheel.yaml`.
+- Host-repo directory layout does not override config-owned workflow locations.
 - Observer is part of cycle closure, not optional cleanup.
 - Artifact readiness must be explicit before promotion.
 - Optional artifact-tool usage may be surfaced by config, but Flywheel core does not require that integration.
-- When the optional artifact workflow integration is enabled, agents should consult `flywheel/tools/artifact_workflow.sh <stage> --format json` for machine-readable stage entry and exit artifact guidance.
+- When the optional artifact workflow integration is enabled, agents should consult the local harness `tools/artifact_workflow.sh <stage> --format json` output for machine-readable stage entry and exit artifact guidance.
 - Risky or sensitive actions require explicit approval and recorded outcome.
 - Workflow changes require synchronized updates across docs, prompts, and tools.
 

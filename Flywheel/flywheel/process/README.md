@@ -12,3 +12,4 @@ These docs define the generic Flywheel workflow contract.
 
 All workflow locations are resolved through `flywheel.yaml`.
 
+In embedded installs, interpret those locations relative to the directory containing `flywheel.yaml`, not the repo root.
