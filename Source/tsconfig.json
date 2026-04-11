@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "types": ["node", "vitest/globals"],
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "../Tools/**/*.ts",
+    "contracts/**/*.ts",
+    "retrieval/**/*.ts",
+    "server/**/*.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "vite.config.ts"
+  ]
+}
