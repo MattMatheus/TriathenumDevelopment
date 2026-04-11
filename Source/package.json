@@ -1,0 +1,29 @@
+{
+  "name": "@triathenum/source",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:app": "vite",
+    "dev:server": "tsx server/index.ts",
+    "diagnose:retrieval": "node --import tsx ../Tools/retrieval-diagnostics.ts",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^10.2.0",
+    "prettier": "^3.8.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.8",
+    "vitest": "^4.1.4"
+  }
+}
