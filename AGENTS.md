@@ -67,6 +67,8 @@ Do not create parallel workflow structures elsewhere in the repo unless the user
 - Respect its internal worldbuilding workflow as vault-local behavior.
 - Do not import the vault's thread/work-item process into repo-level software delivery unless the user explicitly asks for that integration.
 - Do not assume a note belongs in `Triathenum/` just because it is about the product. Product planning and architecture artifacts belong in Flywheel-managed locations unless directed otherwise.
+- `Triathenum/` is an Obsidian Sync-backed vault and is intentionally not managed in Git. Updates inside the vault are durable vault changes, not repo commits.
+- Do not use repo-style commit language for vault-only edits unless the user explicitly means a git change outside the ignored vault.
 
 ## Current Repo Intent
 
