@@ -15,6 +15,7 @@
   "include": [
     "../Tools/**/*.ts",
     "contracts/**/*.ts",
+    "world/**/*.ts",
     "retrieval/**/*.ts",
     "server/**/*.ts",
     "app/**/*.ts",

@@ -1,0 +1,165 @@
+Perfect. I have everything I need. Let me write this up properly.
+
+WorldForge — Feature Specification v0.1
+A self-hosted, AI-integrated worldbuilding wiki for small creative teams
+
+Design Principles
+Before the feature list, a few constraints that should govern every decision:
+
+Wife test: Every feature must be usable by a non-technical person on an iPhone with no onboarding. If it requires knowing what a "slug" or "backlink" is, the UI has failed.
+SRE sanity: Simple deployment first. One compose file, one config, done. Complexity earns its place later.
+AI as collaborator, not crutch: AI features surface suggestions; humans always approve. Nothing auto-modifies content without confirmation.
+Your data, always: Plain-text-readable storage. No proprietary binary formats. Export must be a first-class feature, not an afterthought.
+
+
+1. Core Architecture
+Storage
+
+Primary content store: Markdown files with YAML frontmatter, stored on the local filesystem. This preserves Obsidian compatibility and ensures your existing vault can be imported directly.
+Metadata/index store: A lightweight embedded database (SQLite is the natural fit for "simple first") for entity relationships, backlinks, tags, search indexes, and timeline data. Rebuilt from Markdown on startup if corrupted — source of truth is always the files.
+Media store: Local filesystem directory, served statically. Images, maps, and file attachments organized by entity.
+Vector store: Separate embeddings store (e.g., ChromaDB or SQLite-vec) for semantic search and AI context retrieval. Rebuilt on demand.
+
+Deployment
+
+Single Docker Compose stack: web server, backend API, and database in one file.
+Optional: separate AI service container for local LLM (Ollama), disabled by default.
+Exposed as a PWA (Progressive Web App) — installable on iPhone/iPad from Safari with full offline read access to cached content.
+Reverse-proxy friendly (Caddy/Nginx config examples provided).
+
+Auth
+
+Simple invite-based user model. Owner creates accounts; no self-registration.
+Session-based auth with persistent login on mobile.
+Per-entity visibility: Public to all users / Private to owner / Hidden (exists but not visible to guests).
+No OAuth complexity in v1 — add it later if needed.
+
+
+2. Entity System
+The data model is the heart of the tool. Every piece of lore is an Entity with a type, a Markdown body, YAML frontmatter metadata, and typed relationships to other entities.
+Core Entity Types
+TypeKey FieldsNotesCharacterFull name, aliases, status (alive/dead/unknown), physical description, personality traits, motivations, arc summary, faction memberships, relationships to other charactersRelationships are typed: ally, rival, family, romantic, mentor, unknownLocationName, location type (continent/region/city/building/etc.), parent location, population, climate/atmosphere, political control (faction), notable residents, descriptionHierarchy: World → Region → City → District → BuildingFactionName, type (government/guild/religion/cult/etc.), founding date, goals, rivals, allies, member characters, controlled locationsMagic System / TechnologyName, type, source/rules, limitations/costs, practitioners, associated artifactsRules field is critical — AI uses this for consistency checkingArtifact / ItemName, type, origin, current owner, history, magical/technical propertiesLore ArticleTitle, tags, freeform bodyCatch-all for anything that doesn't fit typed entities: historical events, religions, cultural practices, in-world texts
+Schema Flexibility
+
+Every entity type has a fixed core schema (the typed fields above) plus an open extensions block in YAML frontmatter for custom fields your specific world needs.
+New entity types can be defined in a config file without code changes — the core types are just well-supported defaults.
+
+
+3. Editing Experience
+Editor
+
+Rich WYSIWYG editor (ProseMirror-based) as the default — no Markdown syntax knowledge required for your wife.
+Raw Markdown toggle for power users (you).
+Autosave every 30 seconds and on navigation away.
+Mobile-optimized: large tap targets, collapsible sections, bottom-sheet metadata panel.
+
+Linking
+
+Type [[ to get an inline entity picker — searches by name across all entity types.
+Backlinks panel on every entity page showing all other entities that reference it.
+Unresolved links (references to entities that don't exist yet) are highlighted and queued as stubs — a to-do list for your world.
+Relationship graph auto-populated from both explicit schema fields (character's faction membership) and inline [[links]] in body text.
+
+Media
+
+Drag-and-drop image upload inline in the editor.
+Image gallery per entity.
+Map upload with pin annotations: upload a map image, place named pins, each pin links to a Location entity. No external map service required.
+File attachments (PDFs, reference docs) per entity.
+
+
+4. Navigation & Organization
+
+Dashboard: Recent edits, stub queue, timeline snapshot, and an "AI needs your attention" tray (more below).
+Entity browser: Filterable, sortable list by type, tag, faction, status. Works well on mobile.
+Relationship graph: Visual node-edge graph of entities and their connections. Filterable by entity type and relationship type. Read-only in v1 (editing happens on entity pages, not in the graph).
+Timeline: A horizontal chronology of in-world events. Events are either standalone Lore Articles or anchored to entity milestones (character birth/death, faction founding, artifact creation). Supports multiple in-world calendars with custom epoch definitions.
+Tag system: Free-form tags on all entities, plus auto-generated system tags (e.g., #stub, #ai-flagged, #needs-review).
+Full-text search: Fast, instant, covers all entity fields and body text.
+
+
+5. Collaboration
+Given the small trusted team model, this is deliberately simple:
+
+Optimistic concurrent editing with last-write-wins and a visible "currently editing" indicator per entity (not full Google Docs CRDT in v1).
+Edit history per entity — every save is versioned, diffable, and reversible.
+Comments on any entity (threaded, resolvable) — important for async "I think this contradicts chapter 3" conversations.
+Change feed: A shared activity log showing all edits, new entities, and AI suggestions from all users. Filterable.
+No branching/merging in v1. Everyone works on the same canonical world state. Add it later if you find you need it (you probably won't for 2–5 people).
+
+
+6. AI Features
+This is where the tool differentiates itself. The AI layer is a service abstraction that routes to whichever LLM backend is configured — Anthropic API, OpenAI API, a local Ollama instance, or your existing MCP server via its tool interface.
+6a. Lore Generation / Writing Assistance
+
+Entity generation: Given a name and type, generate a draft entity with filled fields consistent with existing world lore. Always presented as a draft requiring approval before saving.
+Prose assistance: In-editor selection → right-click → "Expand," "Summarize," "Rephrase in world voice," or "Continue." Operates on selected text with full entity context injected.
+Stub filler: For unresolved [[links]], offer to draft the missing entity. One-click to review and accept.
+
+6b. Semantic Search
+
+All entity content is embedded on save.
+Search bar has two modes: keyword (instant, SQLite FTS) and semantic (vector similarity, slightly slower). Toggle between them.
+Semantic search answers questions like "who has a grudge against the crown?" or "what locations are associated with fire magic?" — not just keyword matches.
+AI can be prompted to search your world to answer lore questions directly, with citations to the source entities.
+
+6c. Auto-linking / Relationship Suggestions
+
+On save, the AI scans the new/edited content and suggests [[links]] for entity names it recognizes that aren't already linked.
+Suggests relationship additions: "This character profile mentions House Vaelthar three times but has no faction relationship recorded. Add it?"
+Suggestions appear as non-blocking notifications, never auto-applied.
+
+6d. Summarization
+
+Entity summary: One-click "Summarize this character/location/faction" — generates a 2–3 sentence overview useful for quick reference during writing.
+World state digest: A periodic (or on-demand) summary of recent changes to the world — useful for your wife to catch up after a busy call schedule without reading every edit.
+Arc summary: Given a character, summarize their known story arc across all entities that reference them.
+
+6e. Consistency Checking
+
+This is the most novel feature. On demand (not automatic — too noisy otherwise), the AI audits a selected entity or the entire world for:
+
+Factual contradictions: Character is stated as dead in one article and alive in another.
+Rule violations: A magic system has an established cost/limitation that an artifact or character ability appears to ignore.
+Timeline conflicts: An event references a character being in two places at once, or precedes their birth.
+Orphaned references: Entities referenced in text but not formally linked.
+
+
+Results presented as a flagged list, each with the conflicting passages and a suggested resolution. Human decides what to do.
+
+AI Configuration
+
+Settings panel: select provider (Anthropic / OpenAI / Ollama / MCP), enter API key or endpoint URL, select model.
+Per-feature toggles — you can enable semantic search but disable auto-link suggestions if they're too noisy.
+All AI prompts include a world context block: the system prompt is automatically populated with your world's name, genre, tone notes, and any "ground rules" you define (e.g., "This is a secondary world. There is no gunpowder. Magic has a blood cost."). This context travels with every AI call.
+
+
+7. Import / Export
+
+Import from Obsidian vault: Scan a directory of .md files, parse frontmatter, auto-detect entity types from folder structure or tags, create entities. Wikilinks become backlinks.
+Export to Obsidian vault: Full round-trip. Your files stay yours.
+Export to JSON: Full world snapshot for backup or migration.
+Export to PDF/EPUB: Per-entity or full world export, formatted for readability. Useful for sharing with beta readers.
+Export to Markdown archive: Flat directory of .md files, human-readable without any tooling.
+
+
+8. What's Explicitly Out of Scope for v1
+Keeping this list is as important as the feature list:
+
+No VTT / virtual tabletop features (dice, initiative, battle maps)
+No manuscript / novel draft editor (use Scrivener, iA Writer, or Obsidian for that — link out to it)
+No public-facing world publishing (add in v2 if desired)
+No mobile native apps (PWA covers the iPhone/iPad use case without App Store complexity)
+No plugin system (your SRE instincts will tell you when it's time)
+No multi-world isolation within one install (one install = one world; run multiple instances for multiple projects)
+
+
+Suggested Build Phases
+Phase 1 — The Useful Core
+Entity CRUD, Markdown storage, YAML frontmatter, backlinks, full-text search, mobile-responsive UI, basic auth, Docker Compose deploy. Your wife can use this.
+Phase 2 — The Differentiator
+AI integration (generation, semantic search, auto-link suggestions), vector store, world context injection, MCP bridge.
+Phase 3 — The Polish
+Consistency checker, timeline UI, relationship graph, map pins, world state digest, Obsidian import/export.
+Phase 4 — The Nice-to-Haves
+Edit history/diff, comments, change feed, PDF/EPUB export, advanced entity schemas.

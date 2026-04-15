@@ -14,3 +14,33 @@ export type {
   ReactionOption,
   ReactionResponse
 } from "./actor-reaction.js";
+
+export type {
+  AuthAccountProvisionRequest,
+  AuthAccountSummary,
+  AuthLoginRequest,
+  AuthRole,
+  AuthSessionPayload,
+} from "./auth.js";
+
+export type {
+  WorldBrowserEntityDetail,
+  WorldBrowserMediaUploadRequest,
+  WorldBrowserEntitySaveRequest,
+  WorldBrowserEntitySummary,
+  WorldBrowserPayload,
+} from "./browser.js";
+
+export type {
+  EntityBacklinkRecord,
+  EntityDocument,
+  EntityDocumentEnvelope,
+  EntityIndexRecord,
+  EntityMediaAsset,
+  EntityMediaKind,
+  EntityReferenceRecord,
+  EntityRelationshipReference,
+  EntityVisibility,
+  UnresolvedEntityReference,
+  WorldEntityType,
+} from "./world.js";
