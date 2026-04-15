@@ -11,6 +11,7 @@ import type {
   AuthAccountProvisionRequest,
   AuthLoginRequest,
   WorldConsistencyReviewRequest,
+  WorldDigestRequest,
   WorldEditorSuggestionRequest,
   WorldEditorProseAssistRequest,
   WorldBrowserMediaUploadRequest,
@@ -22,6 +23,7 @@ import type { WorldEntityDraftRequest } from "../contracts/index.js";
 import { assertSafeOwnerBootstrap, AuthError, FileSystemAuthStore } from "./auth-service.js";
 import { PathContainmentError, RequestBodyError, readRequestBody, resolveStaticAssetPath } from "./http-utils.js";
 import { generateWorldEntityDraft } from "./draft-generation-service.js";
+import { generateWorldDigest } from "./digest-service.js";
 import { generateEditorSuggestions } from "./editor-suggestion-service.js";
 import { loadEntityGraph } from "./graph-service.js";
 import { assistEditorProse } from "./prose-assistance-service.js";
@@ -640,6 +642,35 @@ const server = createServer(async (request, response) => {
 
       sendJson(response, 500, {
         error: error instanceof Error ? error.message : "Unable to load the graph explorer.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/world/digest") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const rawBody = await readJsonRequestBody(request, MAX_JSON_BODY_BYTES);
+      const payload = JSON.parse(rawBody) as WorldDigestRequest;
+      const result = await generateWorldDigest(worldRoot, viewer, payload);
+      sendJson(response, 200, result, authHeaders(session));
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to generate the world-state digest.",
       });
     }
 

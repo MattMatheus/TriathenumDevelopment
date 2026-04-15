@@ -114,6 +114,29 @@ export type WorldGraphPayload = {
   edges: WorldGraphEdge[];
 };
 
+export type WorldDigestScope = {
+  mode: "world" | "tag";
+  tag?: string;
+};
+
+export type WorldDigestRequest = WorldDigestScope;
+
+export type WorldDigestSection = {
+  id: string;
+  title: string;
+  summary: string;
+  citations: WorldSemanticCitation[];
+};
+
+export type WorldDigestPayload = {
+  status: "ready" | "unavailable";
+  unavailableReason?: string;
+  providerLabel?: string;
+  scope: WorldDigestScope;
+  summary: string;
+  sections: WorldDigestSection[];
+};
+
 export type WorldEntityDraftRequest = {
   entityType: WorldEntityType;
   proposedName?: string;

@@ -28,3 +28,4 @@ Completed engineering stories accepted by QA.
 22. [STORY-20260415-worldforge-phase3-canon-consistency-review](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260415-worldforge-phase3-canon-consistency-review.md)
 23. [STORY-20260415-worldforge-phase3-timeline-and-chronology-workspace](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260415-worldforge-phase3-timeline-and-chronology-workspace.md)
 24. [STORY-20260415-worldforge-phase3-relationship-graph-explorer](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260415-worldforge-phase3-relationship-graph-explorer.md)
+25. [STORY-20260415-worldforge-phase3-world-state-digest-and-review-briefs](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260415-worldforge-phase3-world-state-digest-and-review-briefs.md)

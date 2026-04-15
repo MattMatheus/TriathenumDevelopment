@@ -10,6 +10,7 @@ import type {
   EntityVisibility,
   WorldConsistencyFinding,
   WorldConsistencyReviewPayload,
+  WorldDigestPayload,
   WorldEditorLinkSuggestion,
   WorldEditorProseAction,
   WorldEditorProseAssistPayload,
@@ -285,6 +286,10 @@ export function App() {
   const [isLoadingTimeline, setIsLoadingTimeline] = useState(false);
   const [graphPayload, setGraphPayload] = useState<WorldGraphPayload | null>(null);
   const [isLoadingGraph, setIsLoadingGraph] = useState(false);
+  const [digestPayload, setDigestPayload] = useState<WorldDigestPayload | null>(null);
+  const [digestScopeMode, setDigestScopeMode] = useState<"world" | "tag">("world");
+  const [digestTag, setDigestTag] = useState("");
+  const [isLoadingDigest, setIsLoadingDigest] = useState(false);
   const canManageAISettings = session?.viewer.role === "owner";
 
   async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
@@ -1191,6 +1196,38 @@ export function App() {
       ...current,
       [finding.id]: state,
     }));
+  }
+
+  async function handleGenerateDigest() {
+    setError(null);
+    setIsLoadingDigest(true);
+
+    try {
+      const request =
+        digestScopeMode === "tag" && digestTag.trim()
+          ? { mode: "tag" as const, tag: digestTag.trim() }
+          : { mode: "world" as const };
+      const response = await apiFetch("/api/world/digest", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to generate the world-state digest.");
+      }
+
+      const payload = (await response.json()) as WorldDigestPayload;
+      setDigestPayload(payload);
+    } catch (caughtError) {
+      setDigestPayload(null);
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsLoadingDigest(false);
+    }
   }
 
   async function handleSaveAISettings(event: React.FormEvent<HTMLFormElement>) {
@@ -2243,6 +2280,72 @@ export function App() {
                 {isLoadingGraph ? "Loading graph explorer..." : "Select an entity to inspect its relationship neighborhood."}
               </p>
             )}
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>World-State Digest</h2>
+              <p>Review briefs stay cited and non-canonical so they help orientation without pretending to be source truth.</p>
+            </header>
+            <section className="detail-section">
+              <div className="editor-row">
+                <label>
+                  Scope
+                  <select value={digestScopeMode} onChange={(event) => setDigestScopeMode(event.target.value as "world" | "tag")}>
+                    <option value="world">Visible World</option>
+                    <option value="tag">Tag Scope</option>
+                  </select>
+                </label>
+                <label>
+                  Tag
+                  <input
+                    value={digestTag}
+                    onChange={(event) => setDigestTag(event.target.value)}
+                    placeholder="history"
+                    disabled={digestScopeMode !== "tag"}
+                  />
+                </label>
+              </div>
+              <div className="editor-actions">
+                <button type="button" onClick={handleGenerateDigest} disabled={isLoadingDigest}>
+                  {isLoadingDigest ? "Generating..." : "Generate Digest"}
+                </button>
+              </div>
+            </section>
+            <section className="detail-section">
+              {digestPayload ? (
+                <div className="stack">
+                  <p className="placeholder">{digestPayload.summary}</p>
+                  {digestPayload.providerLabel ? (
+                    <p className="placeholder">Provider baseline: {digestPayload.providerLabel}</p>
+                  ) : null}
+                  {digestPayload.sections.length ? (
+                    <ul className="sources">
+                      {digestPayload.sections.map((section) => (
+                        <li key={section.id}>
+                          <strong>{section.title}</strong>
+                          <p>{section.summary}</p>
+                          <ul className="sources">
+                            {section.citations.map((citation) => (
+                              <li key={`${section.id}-${citation.entityId}`}>
+                                <strong>{citation.entityName}</strong>
+                                <span>{typeLabels[citation.entityType]}</span>
+                                <p>{citation.excerpt}</p>
+                                <p className="path-copy">{citation.path}</p>
+                              </li>
+                            ))}
+                          </ul>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="placeholder">No digest sections surfaced for this scope yet.</p>
+                  )}
+                </div>
+              ) : (
+                <p className="placeholder">Generate a cited review brief for the visible world or a selected tag scope.</p>
+              )}
+            </section>
           </article>
 
           <article className="panel">
