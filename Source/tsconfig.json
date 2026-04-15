@@ -20,6 +20,7 @@
     "server/**/*.ts",
     "app/**/*.ts",
     "app/**/*.tsx",
-    "vite.config.ts"
+    "vite.config.ts",
+    "vitest.config.ts"
   ]
 }

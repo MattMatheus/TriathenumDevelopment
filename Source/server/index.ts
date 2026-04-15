@@ -6,14 +6,23 @@ import { URL } from "node:url";
 
 import { FileSystemVaultReader } from "../retrieval/index.js";
 import type {
+  AISettingsUpdateRequest,
   ActorReactionRequest,
   AuthAccountProvisionRequest,
   AuthLoginRequest,
+  WorldEditorSuggestionRequest,
+  WorldEditorProseAssistRequest,
   WorldBrowserMediaUploadRequest,
   WorldBrowserEntitySaveRequest,
 } from "../contracts/index.js";
+import { AISettingsError, FileSystemAISettingsStore, loadAIWorldContext } from "./ai-service.js";
 import { ActorReactionError, createActorReactionResponse, defaultVaultRoot } from "./actor-reaction-service.js";
+import type { WorldEntityDraftRequest } from "../contracts/index.js";
 import { AuthError, FileSystemAuthStore } from "./auth-service.js";
+import { generateWorldEntityDraft } from "./draft-generation-service.js";
+import { generateEditorSuggestions } from "./editor-suggestion-service.js";
+import { assistEditorProse } from "./prose-assistance-service.js";
+import { searchWorldSemantically } from "./semantic-search-service.js";
 import {
   attachMediaToEntity,
   defaultWorldRoot,
@@ -29,6 +38,7 @@ const vaultRoot = process.env.TRIATHENUM_VAULT_ROOT ?? defaultVaultRoot();
 const worldRoot = defaultWorldRoot();
 const reader = new FileSystemVaultReader(vaultRoot);
 const authStore = new FileSystemAuthStore(worldRoot);
+const aiSettingsStore = new FileSystemAISettingsStore(worldRoot);
 const SESSION_HEADER = "x-worldforge-session";
 const distRoot = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "dist");
 
@@ -173,6 +183,71 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (request.method === "GET" && requestUrl.pathname === "/api/ai/settings") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const payload = await aiSettingsStore.load();
+      sendJson(response, 200, payload, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+    } catch (error) {
+      sendJson(response, 500, { error: error instanceof Error ? error.message : "Unable to load AI settings." });
+    }
+
+    return;
+  }
+
+  if (request.method === "PUT" && requestUrl.pathname === "/api/ai/settings") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    let rawBody = "";
+
+    for await (const chunk of request) {
+      rawBody += chunk;
+    }
+
+    try {
+      const payload = JSON.parse(rawBody) as AISettingsUpdateRequest;
+      const result = await aiSettingsStore.save(payload);
+      sendJson(response, 200, result, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+    } catch (error) {
+      if (error instanceof AISettingsError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, { error: error instanceof Error ? error.message : "Unable to save AI settings." });
+    }
+
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/ai/context") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const payload = await loadAIWorldContext(worldRoot, viewer, requestUrl.searchParams.get("entityId") ?? undefined);
+      sendJson(response, 200, payload, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, { error: error instanceof Error ? error.message : "Unable to load AI context." });
+    }
+
+    return;
+  }
+
   if (request.method === "POST" && requestUrl.pathname === "/api/auth/accounts") {
     if (!viewer) {
       sendJson(response, 401, { error: "Sign in is required." });
@@ -220,6 +295,29 @@ const server = createServer(async (request, response) => {
 
       sendJson(response, 500, {
         error: error instanceof Error ? error.message : "Unable to load world browser.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/world/semantic-search") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const payload = await searchWorldSemantically(worldRoot, viewer, requestUrl.searchParams.get("q") ?? "");
+      sendJson(response, 200, payload, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to run semantic search.",
       });
     }
 
@@ -359,6 +457,96 @@ const server = createServer(async (request, response) => {
 
       sendJson(response, 500, {
         error: error instanceof Error ? error.message : "Unable to save entity.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/world/entity-drafts") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    let rawBody = "";
+
+    for await (const chunk of request) {
+      rawBody += chunk;
+    }
+
+    try {
+      const payload = JSON.parse(rawBody) as WorldEntityDraftRequest;
+      const result = await generateWorldEntityDraft(worldRoot, viewer, payload);
+      sendJson(response, 200, result, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to generate draft entity.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/world/prose-assistance") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    let rawBody = "";
+
+    for await (const chunk of request) {
+      rawBody += chunk;
+    }
+
+    try {
+      const payload = JSON.parse(rawBody) as WorldEditorProseAssistRequest;
+      const result = await assistEditorProse(worldRoot, viewer, payload);
+      sendJson(response, 200, result, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to generate prose assistance.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/world/editor-suggestions") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    let rawBody = "";
+
+    for await (const chunk of request) {
+      rawBody += chunk;
+    }
+
+    try {
+      const payload = JSON.parse(rawBody) as WorldEditorSuggestionRequest;
+      const result = await generateEditorSuggestions(worldRoot, viewer, payload);
+      sendJson(response, 200, result, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to review editor suggestions.",
       });
     }
 

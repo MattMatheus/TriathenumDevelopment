@@ -1,0 +1,13 @@
+{
+  "headed": true,
+  "session": "worldforge-local",
+  "sessionName": "worldforge-local",
+  "profile": "./.browser/profile",
+  "downloadPath": "./.browser/downloads",
+  "screenshotDir": "./.browser/screenshots",
+  "defaultTimeout": 25000,
+  "allowedDomains": [
+    "127.0.0.1",
+    "localhost"
+  ]
+}

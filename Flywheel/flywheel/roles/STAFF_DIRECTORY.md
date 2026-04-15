@@ -21,6 +21,7 @@ Each role file follows the same structure:
 
 ## Core Roles
 - `Product Manager.md`
+- `Software Engineer.md`
 - `Software Architect.md`
 - `QA Engineer.md`
 - `SDET.md`
@@ -32,4 +33,3 @@ Each role file follows the same structure:
 
 ## Role Boundary
 Roles refine execution quality, but the workflow contract remains defined by Flywheel prompts, process docs, and tools.
-
