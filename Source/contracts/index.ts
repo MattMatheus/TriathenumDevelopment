@@ -1,4 +1,15 @@
 export type {
+  AIProviderConfiguration,
+  AIProviderKind,
+  AIProviderStatus,
+  AISettingsPayload,
+  AISettingsUpdateRequest,
+  AIWorldContextGuardrails,
+  AIWorldContextPayload,
+  AIWorldContextSubject,
+} from "./ai.js";
+
+export type {
   ActorReactionRequest,
   ActorReactionRequestOptions,
   EntityRef,

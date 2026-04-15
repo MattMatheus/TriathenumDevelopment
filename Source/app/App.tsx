@@ -1,6 +1,9 @@
 import { useEffect, useId, useMemo, useState, useTransition } from "react";
 
 import type {
+  AIProviderKind,
+  AISettingsPayload,
+  AIWorldContextPayload,
   AuthAccountSummary,
   AuthSessionPayload,
   EntityMediaAsset,
@@ -43,6 +46,15 @@ type EditorState = {
   fields: EditorFieldRow[];
   media: EntityMediaAsset[];
   relationships: EditorRelationshipRow[];
+};
+
+type AISettingsFormState = {
+  kind: AIProviderKind;
+  label: string;
+  endpoint: string;
+  model: string;
+  mcpServerName: string;
+  apiKey: string;
 };
 
 function formatFieldLabel(value: string): string {
@@ -142,6 +154,17 @@ function defaultVisibleOption(session: AuthSessionPayload | null): EntityVisibil
   return session?.visibilityOptions[0] ?? "all_users";
 }
 
+function buildAISettingsFormState(settings: AISettingsPayload | null): AISettingsFormState {
+  return {
+    kind: settings?.provider.kind ?? "disabled",
+    label: settings?.provider.kind === "disabled" ? "" : settings?.provider.label ?? "",
+    endpoint: settings?.provider.endpoint ?? "",
+    model: settings?.provider.model ?? "",
+    mcpServerName: settings?.provider.mcpServerName ?? "",
+    apiKey: "",
+  };
+}
+
 function readStoredSessionToken(): string | null {
   return window.localStorage.getItem(SESSION_STORAGE_KEY);
 }
@@ -183,6 +206,12 @@ export function App() {
   const [provisionPassword, setProvisionPassword] = useState("");
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+  const [aiSettings, setAISettings] = useState<AISettingsPayload | null>(null);
+  const [aiContext, setAIContext] = useState<AIWorldContextPayload | null>(null);
+  const [aiFormState, setAIFormState] = useState<AISettingsFormState>(buildAISettingsFormState(null));
+  const [isLoadingAISettings, setIsLoadingAISettings] = useState(false);
+  const [isSavingAISettings, setIsSavingAISettings] = useState(false);
+  const [isLoadingAIContext, setIsLoadingAIContext] = useState(false);
 
   async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
@@ -310,6 +339,92 @@ export function App() {
       cancelled = true;
     };
   }, [session, refreshVersion]);
+
+  useEffect(() => {
+    if (!session) {
+      setAISettings(null);
+      setAIContext(null);
+      setAIFormState(buildAISettingsFormState(null));
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingAISettings(true);
+
+    async function loadAISettings() {
+      try {
+        const response = await apiFetch("/api/ai/settings");
+        if (!response.ok) {
+          const body = (await response.json()) as { error?: string };
+          throw new Error(body.error ?? "Unable to load AI settings.");
+        }
+
+        const nextSettings = (await response.json()) as AISettingsPayload;
+        if (!cancelled) {
+          setAISettings(nextSettings);
+          setAIFormState(buildAISettingsFormState(nextSettings));
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingAISettings(false);
+        }
+      }
+    }
+
+    void loadAISettings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session, refreshVersion]);
+
+  useEffect(() => {
+    if (!session) {
+      setAIContext(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingAIContext(true);
+
+    async function loadAIContext() {
+      try {
+        const params = new URLSearchParams();
+        if (selectedEntityId) {
+          params.set("entityId", selectedEntityId);
+        }
+
+        const response = await apiFetch(`/api/ai/context${params.size ? `?${params.toString()}` : ""}`);
+        if (!response.ok) {
+          const body = (await response.json()) as { error?: string };
+          throw new Error(body.error ?? "Unable to load AI context.");
+        }
+
+        const nextContext = (await response.json()) as AIWorldContextPayload;
+        if (!cancelled) {
+          setAIContext(nextContext);
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingAIContext(false);
+        }
+      }
+    }
+
+    void loadAIContext();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEntityId, session, refreshVersion]);
 
   useEffect(() => {
     if (!selectedEntityId || !session) {
@@ -604,6 +719,46 @@ export function App() {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
       setIsUploadingMedia(false);
+    }
+  }
+
+  async function handleSaveAISettings(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setIsSavingAISettings(true);
+
+    try {
+      const response = await apiFetch("/api/ai/settings", {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          kind: aiFormState.kind,
+          label: aiFormState.label,
+          endpoint: aiFormState.kind === "hosted" || aiFormState.kind === "local" ? aiFormState.endpoint : undefined,
+          model: aiFormState.kind === "disabled" ? undefined : aiFormState.model,
+          mcpServerName: aiFormState.kind === "mcp" ? aiFormState.mcpServerName : undefined,
+          apiKey:
+            aiFormState.kind === "hosted"
+              ? aiFormState.apiKey || undefined
+              : null,
+        }),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to save AI settings.");
+      }
+
+      const nextSettings = (await response.json()) as AISettingsPayload;
+      setAISettings(nextSettings);
+      setAIFormState(buildAISettingsFormState(nextSettings));
+      setRefreshVersion((current) => current + 1);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsSavingAISettings(false);
     }
   }
 
@@ -1260,6 +1415,176 @@ export function App() {
             ) : (
               <p className="placeholder">Select an entity to inspect backlinks and source location.</p>
             )}
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>AI Baseline</h2>
+              <p>Optional provider setup and a shared world-context contract for later AI workflows.</p>
+            </header>
+
+            <section className="detail-section">
+              <div className="section-row">
+                <h3>Provider Status</h3>
+                <span className="queue-count">
+                  {isLoadingAISettings ? "..." : aiSettings?.provider.kind ?? "disabled"}
+                </span>
+              </div>
+              <p className="placeholder">
+                {aiSettings?.provider.status.reason ?? "AI stays disabled until a provider is configured."}
+              </p>
+              <p>
+                <strong>Approval required:</strong> {aiSettings?.canonPolicy.approvalRequired ? "Yes" : "No"} •{" "}
+                <strong>Citations required:</strong> {aiSettings?.canonPolicy.citationsRequired ? "Yes" : "No"}
+              </p>
+            </section>
+
+            <form className="stack" onSubmit={handleSaveAISettings}>
+              <label className="field">
+                <span>Provider Kind</span>
+                <select
+                  value={aiFormState.kind}
+                  onChange={(event) =>
+                    setAIFormState((current) => ({
+                      ...current,
+                      kind: event.target.value as AIProviderKind,
+                    }))
+                  }
+                >
+                  {(aiSettings?.availableProviderKinds ?? ["disabled", "hosted", "local", "mcp"]).map((kind) => (
+                    <option key={kind} value={kind}>
+                      {formatFieldLabel(kind)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {aiFormState.kind !== "disabled" ? (
+                <>
+                  <label className="field">
+                    <span>Provider Label</span>
+                    <input
+                      value={aiFormState.label}
+                      onChange={(event) =>
+                        setAIFormState((current) => ({
+                          ...current,
+                          label: event.target.value,
+                        }))
+                      }
+                      placeholder="Optional display name"
+                    />
+                  </label>
+
+                  {aiFormState.kind === "hosted" || aiFormState.kind === "local" ? (
+                    <label className="field">
+                      <span>Endpoint</span>
+                      <input
+                        value={aiFormState.endpoint}
+                        onChange={(event) =>
+                          setAIFormState((current) => ({
+                            ...current,
+                            endpoint: event.target.value,
+                          }))
+                        }
+                        placeholder="http://localhost:11434/v1 or provider URL"
+                      />
+                    </label>
+                  ) : null}
+
+                  {aiFormState.kind === "mcp" ? (
+                    <label className="field">
+                      <span>MCP Server Name</span>
+                      <input
+                        value={aiFormState.mcpServerName}
+                        onChange={(event) =>
+                          setAIFormState((current) => ({
+                            ...current,
+                            mcpServerName: event.target.value,
+                          }))
+                        }
+                        placeholder="worldforge-assistant"
+                      />
+                    </label>
+                  ) : null}
+
+                  <label className="field">
+                    <span>Model</span>
+                    <input
+                      value={aiFormState.model}
+                      onChange={(event) =>
+                        setAIFormState((current) => ({
+                          ...current,
+                          model: event.target.value,
+                        }))
+                      }
+                      placeholder="gpt-5-mini, llama3, or similar"
+                    />
+                  </label>
+
+                  {aiFormState.kind === "hosted" ? (
+                    <label className="field">
+                      <span>API Key</span>
+                      <input
+                        type="password"
+                        value={aiFormState.apiKey}
+                        onChange={(event) =>
+                          setAIFormState((current) => ({
+                            ...current,
+                            apiKey: event.target.value,
+                          }))
+                        }
+                        placeholder={aiSettings?.provider.apiKeyConfigured ? "Stored key will be kept if left blank" : "Paste API key"}
+                      />
+                    </label>
+                  ) : null}
+                </>
+              ) : null}
+
+              <button type="submit" disabled={isSavingAISettings}>
+                {isSavingAISettings ? "Saving AI Baseline..." : "Save AI Baseline"}
+              </button>
+            </form>
+
+            <section className="detail-section">
+              <div className="section-row">
+                <h3>World Context Contract</h3>
+                <span className="queue-count">{isLoadingAIContext ? "..." : aiContext?.world.entityCount ?? 0}</span>
+              </div>
+              {aiContext ? (
+                <div className="stack">
+                  <p className="placeholder">
+                    Visible types: {aiContext.world.availableTypes.join(", ") || "none"} • Tags: {aiContext.world.visibleTagCount}
+                  </p>
+                  <ul className="sources">
+                    <li>
+                      <strong>Canon boundary</strong>
+                      <p>{aiContext.guardrails.canonBoundary}</p>
+                    </li>
+                    <li>
+                      <strong>Approval boundary</strong>
+                      <p>{aiContext.guardrails.approvalBoundary}</p>
+                    </li>
+                    <li>
+                      <strong>Citation boundary</strong>
+                      <p>{aiContext.guardrails.citationBoundary}</p>
+                    </li>
+                  </ul>
+                  {aiContext.subject ? (
+                    <div className="detail-section">
+                      <h3>Selected Subject</h3>
+                      <p>
+                        <strong>{aiContext.subject.name}</strong> • {typeLabels[aiContext.subject.entityType]}
+                      </p>
+                      <p className="path-copy">{aiContext.subject.path}</p>
+                    </div>
+                  ) : (
+                    <p className="placeholder">Select an entity to preview the subject-specific AI context payload.</p>
+                  )}
+                </div>
+              ) : (
+                <p className="placeholder">Loading the shared world-context contract...</p>
+              )}
+            </section>
           </article>
         </section>
       </section>

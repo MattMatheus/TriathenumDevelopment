@@ -6,12 +6,14 @@ import { URL } from "node:url";
 
 import { FileSystemVaultReader } from "../retrieval/index.js";
 import type {
+  AISettingsUpdateRequest,
   ActorReactionRequest,
   AuthAccountProvisionRequest,
   AuthLoginRequest,
   WorldBrowserMediaUploadRequest,
   WorldBrowserEntitySaveRequest,
 } from "../contracts/index.js";
+import { AISettingsError, FileSystemAISettingsStore, loadAIWorldContext } from "./ai-service.js";
 import { ActorReactionError, createActorReactionResponse, defaultVaultRoot } from "./actor-reaction-service.js";
 import { AuthError, FileSystemAuthStore } from "./auth-service.js";
 import {
@@ -29,6 +31,7 @@ const vaultRoot = process.env.TRIATHENUM_VAULT_ROOT ?? defaultVaultRoot();
 const worldRoot = defaultWorldRoot();
 const reader = new FileSystemVaultReader(vaultRoot);
 const authStore = new FileSystemAuthStore(worldRoot);
+const aiSettingsStore = new FileSystemAISettingsStore(worldRoot);
 const SESSION_HEADER = "x-worldforge-session";
 const distRoot = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "dist");
 
@@ -168,6 +171,71 @@ const server = createServer(async (request, response) => {
       }
 
       sendJson(response, 500, { error: error instanceof Error ? error.message : "Unable to load accounts." });
+    }
+
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/ai/settings") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const payload = await aiSettingsStore.load();
+      sendJson(response, 200, payload, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+    } catch (error) {
+      sendJson(response, 500, { error: error instanceof Error ? error.message : "Unable to load AI settings." });
+    }
+
+    return;
+  }
+
+  if (request.method === "PUT" && requestUrl.pathname === "/api/ai/settings") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    let rawBody = "";
+
+    for await (const chunk of request) {
+      rawBody += chunk;
+    }
+
+    try {
+      const payload = JSON.parse(rawBody) as AISettingsUpdateRequest;
+      const result = await aiSettingsStore.save(payload);
+      sendJson(response, 200, result, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+    } catch (error) {
+      if (error instanceof AISettingsError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, { error: error instanceof Error ? error.message : "Unable to save AI settings." });
+    }
+
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/ai/context") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const payload = await loadAIWorldContext(worldRoot, viewer, requestUrl.searchParams.get("entityId") ?? undefined);
+      sendJson(response, 200, payload, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, { error: error instanceof Error ? error.message : "Unable to load AI context." });
     }
 
     return;
