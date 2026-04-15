@@ -1,10 +1,12 @@
 import type {
   UnresolvedEntityReference,
   EntityBacklinkRecord,
+  EntityMediaAsset,
   EntityRelationshipReference,
   EntityVisibility,
   WorldEntityType,
 } from "./world.js";
+import type { AuthSessionPayload } from "./auth.js";
 
 export type WorldBrowserEntitySummary = {
   id: string;
@@ -27,11 +29,13 @@ export type WorldBrowserEntityDetail = {
   body: string;
   path: string;
   fields: Record<string, unknown>;
+  media: Array<EntityMediaAsset & { url: string }>;
   relationships: EntityRelationshipReference[];
   backlinks: EntityBacklinkRecord[];
 };
 
 export type WorldBrowserPayload = {
+  session: AuthSessionPayload;
   entities: WorldBrowserEntitySummary[];
   availableTypes: WorldEntityType[];
   availableTags: string[];
@@ -47,5 +51,14 @@ export type WorldBrowserEntitySaveRequest = {
   tags: string[];
   body: string;
   fields: Record<string, string>;
+  media: EntityMediaAsset[];
   relationships: EntityRelationshipReference[];
+};
+
+export type WorldBrowserMediaUploadRequest = {
+  fileName: string;
+  contentType: string;
+  base64Data: string;
+  alt?: string;
+  caption?: string;
 };

@@ -16,7 +16,16 @@ export type {
 } from "./actor-reaction.js";
 
 export type {
+  AuthAccountProvisionRequest,
+  AuthAccountSummary,
+  AuthLoginRequest,
+  AuthRole,
+  AuthSessionPayload,
+} from "./auth.js";
+
+export type {
   WorldBrowserEntityDetail,
+  WorldBrowserMediaUploadRequest,
   WorldBrowserEntitySaveRequest,
   WorldBrowserEntitySummary,
   WorldBrowserPayload,
@@ -27,6 +36,8 @@ export type {
   EntityDocument,
   EntityDocumentEnvelope,
   EntityIndexRecord,
+  EntityMediaAsset,
+  EntityMediaKind,
   EntityReferenceRecord,
   EntityRelationshipReference,
   EntityVisibility,

@@ -1,0 +1,17 @@
+services:
+  worldforge:
+    build:
+      context: ./Source
+      dockerfile: Dockerfile
+    ports:
+      - "4174:4174"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "4174"
+      TRIATHENUM_WORLD_ROOT: /world
+      TRIATHENUM_VAULT_ROOT: /optional-canon
+      WORLDFORGE_OWNER_EMAIL: ${WORLDFORGE_OWNER_EMAIL:-owner@worldforge.local}
+      WORLDFORGE_OWNER_PASSWORD: ${WORLDFORGE_OWNER_PASSWORD:-worldforge-owner}
+      WORLDFORGE_OWNER_NAME: ${WORLDFORGE_OWNER_NAME:-WorldForge Owner}
+    volumes:
+      - ./Source/world/__fixtures__/world:/world

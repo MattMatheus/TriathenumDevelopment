@@ -1,12 +1,17 @@
 import { useEffect, useId, useMemo, useState, useTransition } from "react";
 
 import type {
+  AuthAccountSummary,
+  AuthSessionPayload,
+  EntityMediaAsset,
   EntityVisibility,
   WorldBrowserEntityDetail,
+  WorldBrowserMediaUploadRequest,
   WorldBrowserEntitySaveRequest,
   WorldBrowserPayload,
   WorldEntityType,
 } from "../contracts/index.js";
+import { nextStoredSessionToken, SESSION_STORAGE_KEY, shouldAttemptWorldLoad } from "./session.js";
 
 const typeLabels: Record<WorldEntityType, string> = {
   character: "Characters",
@@ -36,6 +41,7 @@ type EditorState = {
   tagsText: string;
   body: string;
   fields: EditorFieldRow[];
+  media: EntityMediaAsset[];
   relationships: EditorRelationshipRow[];
 };
 
@@ -80,6 +86,7 @@ function buildEditorState(detail: WorldBrowserEntityDetail): EditorState {
       key,
       value: formatFieldValue(value),
     })),
+    media: detail.media.map(({ url: _url, ...asset }) => asset),
     relationships: detail.relationships.map((relationship) => ({
       type: relationship.type,
       target: relationship.target,
@@ -87,15 +94,16 @@ function buildEditorState(detail: WorldBrowserEntityDetail): EditorState {
   };
 }
 
-function buildNewEditorState(): EditorState {
+function buildNewEditorState(defaultVisibility: EntityVisibility): EditorState {
   return {
     name: "",
     entityType: "lore_article",
-    visibility: "all_users",
+    visibility: defaultVisibility,
     aliasesText: "",
     tagsText: "",
     body: "",
     fields: [],
+    media: [],
     relationships: [],
   };
 }
@@ -120,6 +128,7 @@ function buildSaveRequest(editor: EditorState): WorldBrowserEntitySaveRequest {
         .map((field) => [field.key.trim(), field.value.trim()] as const)
         .filter(([key, value]) => key && value),
     ),
+    media: editor.media,
     relationships: editor.relationships
       .map((relationship) => ({
         type: relationship.type.trim(),
@@ -129,27 +138,80 @@ function buildSaveRequest(editor: EditorState): WorldBrowserEntitySaveRequest {
   };
 }
 
+function defaultVisibleOption(session: AuthSessionPayload | null): EntityVisibility {
+  return session?.visibilityOptions[0] ?? "all_users";
+}
+
+function readStoredSessionToken(): string | null {
+  return window.localStorage.getItem(SESSION_STORAGE_KEY);
+}
+
+function writeStoredSessionToken(token: string | null) {
+  if (!token) {
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(SESSION_STORAGE_KEY, token);
+}
+
 export function App() {
   const typeFilterId = useId();
   const tagFilterId = useId();
   const searchId = useId();
   const [isPending, startTransition] = useTransition();
   const [payload, setPayload] = useState<WorldBrowserPayload | null>(null);
+  const [session, setSession] = useState<AuthSessionPayload | null>(null);
+  const [accounts, setAccounts] = useState<AuthAccountSummary[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [detail, setDetail] = useState<WorldBrowserEntityDetail | null>(null);
   const [typeFilter, setTypeFilter] = useState<WorldEntityType | "all">("all");
   const [tagFilter, setTagFilter] = useState<string>("all");
   const [error, setError] = useState<string | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  const [isLoadingWorld, setIsLoadingWorld] = useState(false);
   const [editorState, setEditorState] = useState<EditorState | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [loginEmail, setLoginEmail] = useState("owner@worldforge.local");
+  const [loginPassword, setLoginPassword] = useState("worldforge-owner");
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [provisionEmail, setProvisionEmail] = useState("");
+  const [provisionName, setProvisionName] = useState("");
+  const [provisionPassword, setProvisionPassword] = useState("");
+  const [isProvisioning, setIsProvisioning] = useState(false);
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+
+  async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+    const headers = new Headers(init.headers);
+    const token = readStoredSessionToken();
+    if (token) {
+      headers.set("x-worldforge-session", token);
+    }
+
+    const response = await fetch(input, {
+      ...init,
+      headers,
+    });
+    writeStoredSessionToken(
+      nextStoredSessionToken(readStoredSessionToken(), response.status, response.headers.get("x-worldforge-session")),
+    );
+
+    return response;
+  }
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadWorld() {
+      if (!shouldAttemptWorldLoad(readStoredSessionToken(), Boolean(session))) {
+        setIsLoadingWorld(false);
+        return;
+      }
+
+      setIsLoadingWorld(true);
       setError(null);
 
       try {
@@ -158,7 +220,23 @@ export function App() {
           params.set("q", searchQuery.trim());
         }
 
-        const response = await fetch(`/api/world/entities${params.size ? `?${params.toString()}` : ""}`);
+        const response = await apiFetch(`/api/world/entities${params.size ? `?${params.toString()}` : ""}`);
+        if (response.status === 401) {
+          if (!cancelled) {
+            writeStoredSessionToken(null);
+            startTransition(() => {
+              setSession(null);
+              setPayload(null);
+              setAccounts([]);
+              setSelectedEntityId(null);
+              setDetail(null);
+              setEditorState(null);
+              setIsEditing(false);
+            });
+          }
+          return;
+        }
+
         if (!response.ok) {
           const body = (await response.json()) as { error?: string };
           throw new Error(body.error ?? "Unable to load the world browser.");
@@ -171,6 +249,7 @@ export function App() {
 
         startTransition(() => {
           setPayload(nextPayload);
+          setSession(nextPayload.session);
           setSelectedEntityId((current) => {
             if (isEditing && current === null) {
               return null;
@@ -181,7 +260,12 @@ export function App() {
         });
       } catch (caughtError) {
         if (!cancelled) {
+          writeStoredSessionToken(null);
           setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingWorld(false);
         }
       }
     }
@@ -191,10 +275,44 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [isEditing, searchQuery]);
+  }, [isEditing, refreshVersion, searchQuery]);
 
   useEffect(() => {
-    if (!selectedEntityId) {
+    if (!session?.canManageAccounts) {
+      setAccounts([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadAccounts() {
+      try {
+        const response = await apiFetch("/api/auth/accounts");
+        if (!response.ok) {
+          const body = (await response.json()) as { error?: string };
+          throw new Error(body.error ?? "Unable to load accounts.");
+        }
+
+        const body = (await response.json()) as { accounts: AuthAccountSummary[] };
+        if (!cancelled) {
+          setAccounts(body.accounts);
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+        }
+      }
+    }
+
+    void loadAccounts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session, refreshVersion]);
+
+  useEffect(() => {
+    if (!selectedEntityId || !session) {
       setDetail(null);
       return;
     }
@@ -205,7 +323,18 @@ export function App() {
 
     async function loadDetail() {
       try {
-        const response = await fetch(`/api/world/entities/${encodeURIComponent(entityId)}`);
+        const response = await apiFetch(`/api/world/entities/${encodeURIComponent(entityId)}`);
+        if (response.status === 401) {
+          if (!cancelled) {
+            writeStoredSessionToken(null);
+            setSession(null);
+            setPayload(null);
+            setSelectedEntityId(null);
+            setDetail(null);
+          }
+          return;
+        }
+
         if (!response.ok) {
           const body = (await response.json()) as { error?: string };
           throw new Error(body.error ?? "Unable to load entity detail.");
@@ -238,7 +367,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [isEditing, selectedEntityId]);
+  }, [isEditing, selectedEntityId, session]);
 
   const filteredEntities = useMemo(() => {
     const entities = payload?.entities ?? [];
@@ -285,7 +414,7 @@ export function App() {
     try {
       const request = buildSaveRequest(editorState);
       const isUpdate = Boolean(request.id);
-      const response = await fetch(
+      const response = await apiFetch(
         isUpdate ? `/api/world/entities/${encodeURIComponent(request.id!)}` : "/api/world/entities",
         {
           method: isUpdate ? "PUT" : "POST",
@@ -307,11 +436,17 @@ export function App() {
         params.set("q", searchQuery.trim());
       }
 
-      const refreshed = await fetch(`/api/world/entities${params.size ? `?${params.toString()}` : ""}`);
+      const refreshed = await apiFetch(`/api/world/entities${params.size ? `?${params.toString()}` : ""}`);
+      if (!refreshed.ok) {
+        const body = (await refreshed.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to refresh the world browser.");
+      }
+
       const refreshedPayload = (await refreshed.json()) as WorldBrowserPayload;
 
       startTransition(() => {
         setPayload(refreshedPayload);
+        setSession(refreshedPayload.session);
         setDetail(saved);
         setEditorState(buildEditorState(saved));
         setSelectedEntityId(saved.id);
@@ -324,15 +459,240 @@ export function App() {
     }
   }
 
+  async function handleSignIn(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setIsSigningIn(true);
+
+    try {
+      const response = await apiFetch("/api/auth/session", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          email: loginEmail,
+          password: loginPassword,
+        }),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to sign in.");
+      }
+
+      const nextSession = (await response.json()) as AuthSessionPayload;
+      startTransition(() => {
+        setSession(nextSession);
+        setRefreshVersion((current) => current + 1);
+      });
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsSigningIn(false);
+    }
+  }
+
+  async function handleSignOut() {
+    setError(null);
+
+    try {
+      await apiFetch("/api/auth/session", {
+        method: "DELETE",
+      });
+    } finally {
+      writeStoredSessionToken(null);
+      startTransition(() => {
+        setSession(null);
+        setPayload(null);
+        setAccounts([]);
+        setDetail(null);
+        setEditorState(null);
+        setSelectedEntityId(null);
+        setIsEditing(false);
+      });
+    }
+  }
+
+  async function handleProvisionAccount(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setIsProvisioning(true);
+
+    try {
+      const response = await apiFetch("/api/auth/accounts", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          email: provisionEmail,
+          displayName: provisionName,
+          password: provisionPassword,
+        }),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to provision collaborator.");
+      }
+
+      const account = (await response.json()) as AuthAccountSummary;
+      setAccounts((current) => [...current, account].sort((left, right) => left.email.localeCompare(right.email)));
+      setProvisionEmail("");
+      setProvisionName("");
+      setProvisionPassword("");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsProvisioning(false);
+    }
+  }
+
+  function mediaUrl(url: string): string {
+    const token = readStoredSessionToken();
+    if (!token) {
+      return url;
+    }
+
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}sessionToken=${encodeURIComponent(token)}`;
+  }
+
+  async function handleUploadMedia(file: File) {
+    if (!editorState?.id) {
+      setError("Save the entity first before attaching media.");
+      return;
+    }
+
+    setError(null);
+    setIsUploadingMedia(true);
+
+    try {
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error ?? new Error("Unable to read file."));
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.readAsDataURL(file);
+      });
+
+      const payload: WorldBrowserMediaUploadRequest = {
+        fileName: file.name,
+        contentType: file.type || "application/octet-stream",
+        base64Data,
+      };
+
+      const response = await apiFetch(`/api/world/entities/${encodeURIComponent(editorState.id)}/media`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to attach media.");
+      }
+
+      const nextDetail = (await response.json()) as WorldBrowserEntityDetail;
+      startTransition(() => {
+        setDetail(nextDetail);
+        setEditorState(buildEditorState(nextDetail));
+      });
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsUploadingMedia(false);
+    }
+  }
+
+  if (!session) {
+    return (
+      <main className="shell">
+        <section className="hero">
+          <p className="eyebrow">WorldForge Access</p>
+          <h1>Sign in before browsing or editing this world.</h1>
+          <p className="lede">
+            WorldForge keeps the useful core simple: one owner account can provision collaborators, and sessions stay
+            signed in across normal mobile use.
+          </p>
+        </section>
+
+        <section className="auth-layout">
+          <article className="panel auth-panel">
+            <header className="panel-header">
+              <h2>Persistent Session Login</h2>
+              <p>Use the owner or collaborator account that was provisioned for this world.</p>
+            </header>
+
+            <form className="stack" onSubmit={handleSignIn}>
+              <label className="field">
+                <span>Email</span>
+                <input value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} />
+              </label>
+
+              <label className="field">
+                <span>Password</span>
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={(event) => setLoginPassword(event.target.value)}
+                />
+              </label>
+
+              <button type="submit" disabled={isSigningIn}>
+                {isSigningIn ? "Signing In..." : "Sign In"}
+              </button>
+            </form>
+
+            {error ? <p className="error-inline auth-error">{error}</p> : null}
+          </article>
+
+          <article className="panel auth-panel">
+            <header className="panel-header">
+              <h2>Bootstrap Note</h2>
+              <p>The first owner account is bootstrapped from environment variables or local defaults.</p>
+            </header>
+            <div className="stack">
+              <p className="placeholder">
+                Default local credentials are <strong>owner@worldforge.local</strong> and <strong>worldforge-owner</strong>
+                until self-hosted values override them.
+              </p>
+              <p className="placeholder">
+                After signing in as the owner, provision collaborator accounts directly from the browser. No self-service
+                signup is exposed in this baseline.
+              </p>
+            </div>
+          </article>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="shell">
       <section className="hero">
-        <p className="eyebrow">WorldForge Browser</p>
-        <h1>Browse and shape your world without touching raw markdown.</h1>
-        <p className="lede">
-          Browse calm entity views, then shift directly into a safe editing surface when you need
-          to update canon.
-        </p>
+        <div className="hero-bar">
+          <div>
+            <p className="eyebrow">WorldForge Browser</p>
+            <h1>Browse and shape your world without touching raw markdown.</h1>
+            <p className="lede">
+              Browse calm entity views, then shift directly into a safe editing surface when you need to update canon.
+            </p>
+          </div>
+
+          <div className="session-card">
+            <p className="session-label">Signed in as</p>
+            <strong>{session.viewer.displayName}</strong>
+            <span>
+              {session.viewer.email} • {session.viewer.role}
+            </span>
+            <button type="button" className="secondary-action compact" onClick={handleSignOut}>
+              Sign Out
+            </button>
+          </div>
+        </div>
       </section>
 
       <section className="workspace">
@@ -382,6 +742,7 @@ export function App() {
 
           <div className="browser-meta">
             <span>{filteredEntities.length} visible entries</span>
+            <span>{isLoadingWorld ? "Refreshing..." : "Session persisted"}</span>
             {error ? <span className="error-inline">{error}</span> : null}
           </div>
 
@@ -392,7 +753,7 @@ export function App() {
               setIsEditing(true);
               setSelectedEntityId(null);
               setDetail(null);
-              setEditorState(buildNewEditorState());
+              setEditorState(buildNewEditorState(defaultVisibleOption(session)));
             }}
           >
             New Entity
@@ -445,6 +806,50 @@ export function App() {
               <p className="placeholder">No unresolved references are waiting right now.</p>
             )}
           </section>
+
+          {session.canManageAccounts ? (
+            <section className="detail-section">
+              <div className="section-row">
+                <h3>Collaborator Access</h3>
+                <span className="queue-count">{accounts.length}</span>
+              </div>
+
+              <form className="stack" onSubmit={handleProvisionAccount}>
+                <label className="field">
+                  <span>Email</span>
+                  <input value={provisionEmail} onChange={(event) => setProvisionEmail(event.target.value)} />
+                </label>
+
+                <label className="field">
+                  <span>Display Name</span>
+                  <input value={provisionName} onChange={(event) => setProvisionName(event.target.value)} />
+                </label>
+
+                <label className="field">
+                  <span>Temporary Password</span>
+                  <input
+                    type="password"
+                    value={provisionPassword}
+                    onChange={(event) => setProvisionPassword(event.target.value)}
+                  />
+                </label>
+
+                <button type="submit" disabled={isProvisioning}>
+                  {isProvisioning ? "Provisioning..." : "Create Collaborator"}
+                </button>
+              </form>
+
+              <ul className="sources">
+                {accounts.map((account) => (
+                  <li key={account.id}>
+                    <strong>{account.displayName}</strong>
+                    <span>{account.email}</span>
+                    <p>{account.role}</p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </section>
 
         <section className="results">
@@ -505,9 +910,11 @@ export function App() {
                         )
                       }
                     >
-                      <option value="all_users">All users</option>
-                      <option value="owner_only">Owner only</option>
-                      <option value="hidden">Hidden</option>
+                      {session.visibilityOptions.map((visibility) => (
+                        <option key={visibility} value={visibility}>
+                          {visibility.replace(/_/g, " ")}
+                        </option>
+                      ))}
                     </select>
                   </label>
                 </div>
@@ -662,6 +1069,40 @@ export function App() {
                   />
                 </label>
 
+                <section className="detail-section">
+                  <div className="section-row">
+                    <h3>Media Attachments</h3>
+                    <span className="queue-count">{editorState.media.length}</span>
+                  </div>
+                  {editorState.id ? (
+                    <label className="field">
+                      <span>Attach file or image</span>
+                      <input
+                        type="file"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) {
+                            void handleUploadMedia(file);
+                            event.target.value = "";
+                          }
+                        }}
+                      />
+                    </label>
+                  ) : (
+                    <p className="placeholder">Save this entity once before attaching media.</p>
+                  )}
+                  {isUploadingMedia ? <p className="placeholder">Uploading media...</p> : null}
+                  <ul className="sources">
+                    {editorState.media.map((asset) => (
+                      <li key={asset.id}>
+                        <strong>{asset.originalFileName}</strong>
+                        <span>{asset.kind}</span>
+                        <p>{asset.caption ?? asset.alt ?? asset.path}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+
                 <div className="editor-actions">
                   <button type="submit" disabled={isSaving}>
                     {isSaving ? "Saving..." : "Save Entity"}
@@ -704,6 +1145,28 @@ export function App() {
                 </div>
 
                 <div className="detail-grid">
+                  <section className="detail-section">
+                    <h3>Media</h3>
+                    {detail.media.length ? (
+                      <div className="media-grid">
+                        {detail.media.map((asset) => (
+                          <article key={asset.id} className="media-card">
+                            {asset.kind === "image" ? (
+                              <img src={mediaUrl(asset.url)} alt={asset.alt ?? asset.originalFileName} className="media-preview" />
+                            ) : null}
+                            <strong>{asset.originalFileName}</strong>
+                            <p>{asset.caption ?? asset.alt ?? asset.contentType}</p>
+                            <a href={mediaUrl(asset.url)} target="_blank" rel="noreferrer">
+                              Open media
+                            </a>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <p>No media attached yet.</p>
+                    )}
+                  </section>
+
                   <section className="detail-section">
                     <h3>Body</h3>
                     <p className="body-copy">{detail.body}</p>

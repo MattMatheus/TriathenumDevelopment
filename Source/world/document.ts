@@ -3,6 +3,8 @@ import path from "node:path";
 import type {
   EntityDocument,
   EntityDocumentEnvelope,
+  EntityMediaAsset,
+  EntityMediaKind,
   EntityRelationshipReference,
   EntityVisibility,
   WorldEntityType,
@@ -59,6 +61,41 @@ function asRelationshipArray(value: FrontmatterValue | undefined): EntityRelatio
   });
 }
 
+function asMediaArray(value: FrontmatterValue | undefined): EntityMediaAsset[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return [];
+    }
+
+    const id = typeof item.id === "string" ? item.id : "";
+    const kind = item.kind === "image" || item.kind === "file" ? (item.kind as EntityMediaKind) : "file";
+    const assetPath = typeof item.path === "string" ? item.path : "";
+    const contentType = typeof item.content_type === "string" ? item.content_type : "application/octet-stream";
+    const originalFileName =
+      typeof item.original_file_name === "string" ? item.original_file_name : assetPath.split("/").pop() ?? id;
+
+    if (!id || !assetPath) {
+      return [];
+    }
+
+    return [
+      {
+        id,
+        kind,
+        path: assetPath,
+        contentType,
+        originalFileName,
+        alt: typeof item.alt === "string" ? item.alt : undefined,
+        caption: typeof item.caption === "string" ? item.caption : undefined,
+      },
+    ];
+  });
+}
+
 function deriveEntityType(value: FrontmatterValue | undefined): WorldEntityType {
   if (typeof value === "string" && ENTITY_TYPES.has(value as WorldEntityType)) {
     return value as WorldEntityType;
@@ -107,6 +144,7 @@ function buildEnvelope(frontmatter: FrontmatterObject, filePath: string): Entity
     aliases: asStringArray(frontmatter.aliases),
     tags: asStringArray(frontmatter.tags),
     visibility: deriveVisibility(frontmatter.visibility),
+    media: asMediaArray(frontmatter.media),
     relationships: asRelationshipArray(frontmatter.relationships),
     extensions: asRecord(frontmatter.extensions),
   };
@@ -123,6 +161,7 @@ function extractFields(frontmatter: FrontmatterObject): Record<string, unknown> 
       key === "aliases" ||
       key === "tags" ||
       key === "visibility" ||
+      key === "media" ||
       key === "relationships" ||
       key === "extensions"
     ) {
@@ -143,6 +182,15 @@ function orderedFrontmatter(document: EntityDocument): FrontmatterObject {
     aliases: document.envelope.aliases,
     tags: document.envelope.tags,
     visibility: document.envelope.visibility,
+    media: (document.envelope.media ?? []).map((asset) => ({
+      id: asset.id,
+      kind: asset.kind,
+      path: asset.path,
+      content_type: asset.contentType,
+      original_file_name: asset.originalFileName,
+      ...(asset.alt ? { alt: asset.alt } : {}),
+      ...(asset.caption ? { caption: asset.caption } : {}),
+    })),
     relationships: document.envelope.relationships.map((relationship) => ({
       type: relationship.type,
       target: relationship.target,

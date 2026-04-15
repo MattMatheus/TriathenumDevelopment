@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 import type { EntityDocument, WorldEntityType } from "../contracts/index.js";
 import { parseEntityDocument, serializeEntityDocument, updateEntityDocumentPath } from "./document.js";
@@ -27,6 +28,10 @@ async function walk(dir: string): Promise<string[]> {
 
 export class FileSystemWorldDocumentStore implements WorldDocumentStore {
   constructor(private readonly worldRoot: string) {}
+
+  mediaRoot(): string {
+    return path.join(this.worldRoot, "media");
+  }
 
   async listEntityPaths(): Promise<string[]> {
     return walk(this.worldRoot);
@@ -59,5 +64,26 @@ export class FileSystemWorldDocumentStore implements WorldDocumentStore {
       .replace(/^-+|-+$/g, "") || "untitled-entity";
 
     return path.join(this.worldRoot, folder, `${slug}.md`);
+  }
+
+  resolveMediaPath(relativeMediaPath: string): string {
+    return path.join(this.worldRoot, relativeMediaPath);
+  }
+
+  buildMediaPath(entityId: string, originalFileName: string): string {
+    const parsed = path.parse(originalFileName);
+    const safeBaseName = (parsed.name || "asset")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "asset";
+    const extension = parsed.ext.toLowerCase();
+    return path.join("media", entityId, `${safeBaseName}-${randomUUID().slice(0, 8)}${extension}`);
+  }
+
+  async writeMediaAsset(relativeMediaPath: string, contents: Buffer): Promise<string> {
+    const absolutePath = this.resolveMediaPath(relativeMediaPath);
+    await mkdir(path.dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, contents);
+    return absolutePath;
   }
 }

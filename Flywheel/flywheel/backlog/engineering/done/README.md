@@ -14,3 +14,5 @@ Engineering work accepted by QA.
 10. `STORY-20260414-worldforge-phase1-responsive-world-browser.md`
 11. `STORY-20260414-worldforge-phase1-markdown-safe-entity-editor.md`
 12. `STORY-20260414-worldforge-phase1-search-backlinks-and-stub-management.md`
+13. `STORY-20260414-worldforge-phase1-auth-visibility-and-session-baseline.md`
+14. `STORY-20260414-worldforge-phase1-media-and-compose-baseline.md`

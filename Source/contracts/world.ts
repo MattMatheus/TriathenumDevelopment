@@ -8,6 +8,18 @@ export type WorldEntityType =
 
 export type EntityVisibility = "all_users" | "owner_only" | "hidden";
 
+export type EntityMediaKind = "image" | "file";
+
+export type EntityMediaAsset = {
+  id: string;
+  kind: EntityMediaKind;
+  path: string;
+  contentType: string;
+  originalFileName: string;
+  alt?: string;
+  caption?: string;
+};
+
 export type EntityRelationshipReference = {
   type: string;
   target: string;
@@ -21,6 +33,7 @@ export type EntityDocumentEnvelope = {
   aliases: string[];
   tags: string[];
   visibility: EntityVisibility;
+  media: EntityMediaAsset[];
   relationships: EntityRelationshipReference[];
   extensions: Record<string, unknown>;
 };

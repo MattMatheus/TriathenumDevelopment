@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { loadWorldBrowserPayload, loadWorldEntityDetail, saveWorldEntity } from "./world-browser-service.js";
+import type { AuthenticatedViewer } from "./auth-service.js";
+import { attachMediaToEntity, loadWorldBrowserPayload, loadWorldEntityDetail, loadWorldEntityMedia, saveWorldEntity } from "./world-browser-service.js";
 
 const fixtureRoot = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -16,6 +17,20 @@ const fixtureRoot = path.join(
 );
 
 const tempDirs: string[] = [];
+const ownerViewer: AuthenticatedViewer = {
+  id: "account-owner",
+  email: "owner@example.com",
+  displayName: "Owner",
+  role: "owner",
+  createdAt: new Date().toISOString(),
+};
+const collaboratorViewer: AuthenticatedViewer = {
+  id: "account-collaborator",
+  email: "writer@example.com",
+  displayName: "Writer",
+  role: "collaborator",
+  createdAt: new Date().toISOString(),
+};
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -23,7 +38,7 @@ afterEach(async () => {
 
 describe("loadWorldBrowserPayload", () => {
   it("returns entity summaries with available filters", async () => {
-    const payload = await loadWorldBrowserPayload(fixtureRoot);
+    const payload = await loadWorldBrowserPayload(fixtureRoot, ownerViewer);
 
     expect(payload.entities).toHaveLength(4);
     expect(payload.availableTypes).toEqual(["character", "faction", "location", "lore_article"]);
@@ -37,7 +52,7 @@ describe("loadWorldBrowserPayload", () => {
   });
 
   it("searches the indexed entity corpus by keyword", async () => {
-    const payload = await loadWorldBrowserPayload(fixtureRoot, "river");
+    const payload = await loadWorldBrowserPayload(fixtureRoot, ownerViewer, "river");
 
     expect(payload.entities.map((entity) => entity.id)).toEqual([
       "faction-council-of-twelve-regions",
@@ -45,11 +60,35 @@ describe("loadWorldBrowserPayload", () => {
       "lore-river-levy-crisis",
     ]);
   });
+
+  it("hides owner-only entities from collaborators", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "worldforge-browser-"));
+    tempDirs.push(tempRoot);
+    await cp(fixtureRoot, tempRoot, { recursive: true });
+
+    await saveWorldEntity(tempRoot, ownerViewer, {
+      id: "location-silverkeep",
+      name: "Silverkeep",
+      entityType: "location",
+      visibility: "owner_only",
+      aliases: ["The River City"],
+      tags: ["city", "river"],
+      body: "Silverkeep is now private to the owner.",
+      fields: {
+        location_type: "city",
+      },
+      media: [],
+      relationships: [],
+    });
+
+    const payload = await loadWorldBrowserPayload(tempRoot, collaboratorViewer);
+    expect(payload.entities.map((entity) => entity.id)).not.toContain("location-silverkeep");
+  });
 });
 
 describe("loadWorldEntityDetail", () => {
   it("returns a readable entity detail with backlinks", async () => {
-    const detail = await loadWorldEntityDetail(fixtureRoot, "location-silverkeep");
+    const detail = await loadWorldEntityDetail(fixtureRoot, ownerViewer, "location-silverkeep");
 
     expect(detail).not.toBeNull();
     expect(detail?.name).toBe("Silverkeep");
@@ -61,6 +100,23 @@ describe("loadWorldEntityDetail", () => {
     ]);
     expect(detail?.backlinks.some((item) => item.sourceEntityId === "character-eliana-tanaka")).toBe(true);
   });
+
+  it("returns media URLs for attached assets", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "worldforge-browser-"));
+    tempDirs.push(tempRoot);
+    await cp(fixtureRoot, tempRoot, { recursive: true });
+
+    const detail = await attachMediaToEntity(tempRoot, ownerViewer, "location-silverkeep", {
+      fileName: "silverkeep-map.png",
+      contentType: "image/png",
+      base64Data: Buffer.from("png-bytes").toString("base64"),
+      alt: "Map",
+      caption: "Sketch",
+    });
+
+    expect(detail.media).toHaveLength(1);
+    expect(detail.media[0]?.url).toContain("/api/world/entities/location-silverkeep/media/");
+  });
 });
 
 describe("saveWorldEntity", () => {
@@ -69,7 +125,7 @@ describe("saveWorldEntity", () => {
     tempDirs.push(tempRoot);
     await cp(fixtureRoot, tempRoot, { recursive: true });
 
-    const saved = await saveWorldEntity(tempRoot, {
+    const saved = await saveWorldEntity(tempRoot, ownerViewer, {
       id: "location-silverkeep",
       name: "Silverkeep",
       entityType: "location",
@@ -81,6 +137,7 @@ describe("saveWorldEntity", () => {
         location_type: "city",
         parent_location: "River Provinces",
       },
+      media: [],
       relationships: [
         {
           type: "governed_by",
@@ -98,7 +155,7 @@ describe("saveWorldEntity", () => {
     tempDirs.push(tempRoot);
     await cp(fixtureRoot, tempRoot, { recursive: true });
 
-    const saved = await saveWorldEntity(tempRoot, {
+    const saved = await saveWorldEntity(tempRoot, ownerViewer, {
       name: "Lantern Harbor",
       entityType: "location",
       visibility: "all_users",
@@ -108,10 +165,49 @@ describe("saveWorldEntity", () => {
       fields: {
         location_type: "city",
       },
+      media: [],
       relationships: [],
     });
 
     expect(saved.id).toBe("location-lantern-harbor");
     expect(saved.path).toContain("locations/lantern-harbor.md");
+  });
+
+  it("prevents collaborators from editing owner-only entities", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "worldforge-browser-"));
+    tempDirs.push(tempRoot);
+    await cp(fixtureRoot, tempRoot, { recursive: true });
+
+    await expect(
+      saveWorldEntity(tempRoot, collaboratorViewer, {
+        id: "location-silverkeep",
+        name: "Silverkeep",
+        entityType: "location",
+        visibility: "owner_only",
+        aliases: [],
+        tags: ["city"],
+        body: "Should not save.",
+        fields: {},
+        media: [],
+        relationships: [],
+      }),
+    ).rejects.toThrow(/permission|visibility/i);
+  });
+
+  it("stores uploaded media on the local filesystem and resolves it for serving", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "worldforge-browser-"));
+    tempDirs.push(tempRoot);
+    await cp(fixtureRoot, tempRoot, { recursive: true });
+
+    const updated = await attachMediaToEntity(tempRoot, ownerViewer, "location-silverkeep", {
+      fileName: "harbor-report.txt",
+      contentType: "text/plain",
+      base64Data: Buffer.from("harbor report").toString("base64"),
+      caption: "A report",
+    });
+
+    const media = await loadWorldEntityMedia(tempRoot, ownerViewer, "location-silverkeep", updated.media[0]!.id);
+    expect(media?.absolutePath).toContain("media/location-silverkeep/");
+    expect(media?.contentType).toBe("text/plain");
   });
 });

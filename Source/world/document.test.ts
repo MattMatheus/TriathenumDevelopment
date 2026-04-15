@@ -30,6 +30,7 @@ describe("parseEntityDocument", () => {
     expect(document.envelope.entityType).toBe("character");
     expect(document.envelope.aliases).toEqual(["Councilor Tanaka", "Eliana"]);
     expect(document.envelope.relationships).toHaveLength(2);
+    expect(document.envelope.media).toEqual([]);
     expect(document.fields.status).toBe("alive");
     expect(document.body).toContain("[[Council of Twelve Regions]]");
   });
@@ -45,6 +46,26 @@ describe("serializeEntityDocument", () => {
     const reparsed = parseEntityDocument(filePath, serialized);
 
     expect(reparsed).toEqual(parsed);
+  });
+
+  it("round-trips media assets in the shared document model", async () => {
+    const filePath = path.join(fixtureRoot, "locations", "silverkeep.md");
+    const source = await readFile(filePath, "utf8");
+    const parsed = parseEntityDocument(filePath, source);
+    parsed.envelope.media = [
+      {
+        id: "city-map",
+        kind: "image",
+        path: "media/location-silverkeep/city-map.png",
+        contentType: "image/png",
+        originalFileName: "city-map.png",
+        alt: "Silverkeep from above",
+        caption: "A useful map sketch.",
+      },
+    ];
+
+    const reparsed = parseEntityDocument(filePath, serializeEntityDocument(parsed));
+    expect(reparsed.envelope.media).toEqual(parsed.envelope.media);
   });
 });
 

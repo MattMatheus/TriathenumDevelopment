@@ -6,8 +6,7 @@ Refined engineering work can wait here before activation if the host repo uses a
 
 ### Phase 1
 
-1. [STORY-20260414-worldforge-phase1-auth-visibility-and-session-baseline](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/ready/STORY-20260414-worldforge-phase1-auth-visibility-and-session-baseline.md)
-2. [STORY-20260414-worldforge-phase1-media-and-compose-baseline](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/ready/STORY-20260414-worldforge-phase1-media-and-compose-baseline.md)
+No engineering story is currently waiting in Phase 1 ready.
 
 ### Phase 2
 
