@@ -1,2 +1,4 @@
 Triathenum/
 .DS_Store
+Source/dist/
+Source/node_modules/
