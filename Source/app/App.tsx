@@ -8,12 +8,33 @@ import type {
   AuthSessionPayload,
   EntityMediaAsset,
   EntityVisibility,
+  WorldEditorLinkSuggestion,
+  WorldEditorProseAction,
+  WorldEditorProseAssistPayload,
+  WorldEditorRelationshipSuggestion,
+  WorldEditorSuggestionPayload,
+  WorldEditorSummarySuggestion,
+  WorldEntityDraftPayload,
+  WorldSearchMode,
+  WorldSemanticSearchPayload,
   WorldBrowserEntityDetail,
   WorldBrowserMediaUploadRequest,
   WorldBrowserEntitySaveRequest,
   WorldBrowserPayload,
   WorldEntityType,
 } from "../contracts/index.js";
+import {
+  applyEditorProseResult,
+  buildEditorProseAssistRequest,
+  previewEditorProseResult,
+  rejectEditorProseResult,
+} from "./editor-prose-assistance.js";
+import {
+  applyLinkSuggestion,
+  applyRelationshipSuggestion,
+  applySummarySuggestion,
+  buildEditorSuggestionRequest,
+} from "./editor-suggestions.js";
 import { nextStoredSessionToken, SESSION_STORAGE_KEY, shouldAttemptWorldLoad } from "./session.js";
 
 const typeLabels: Record<WorldEntityType, string> = {
@@ -23,6 +44,12 @@ const typeLabels: Record<WorldEntityType, string> = {
   magic_system_or_technology: "Systems",
   artifact: "Artifacts",
   lore_article: "Lore",
+};
+
+const proseActionLabels: Record<WorldEditorProseAction, string> = {
+  summarize: "Summarize",
+  rephrase: "Rephrase",
+  continue: "Continue",
 };
 
 type EditorFieldRow = {
@@ -55,6 +82,15 @@ type AISettingsFormState = {
   model: string;
   mcpServerName: string;
   apiKey: string;
+};
+
+type DraftProvenanceState = NonNullable<WorldEntityDraftPayload["provenance"]>;
+type ProseSuggestionState = WorldEditorProseAssistPayload & {
+  status: "ready";
+  suggestedText: string;
+};
+type EditorSuggestionState = WorldEditorSuggestionPayload & {
+  status: "ready";
 };
 
 function formatFieldLabel(value: string): string {
@@ -120,6 +156,30 @@ function buildNewEditorState(defaultVisibility: EntityVisibility): EditorState {
   };
 }
 
+function buildEditorStateFromDraft(
+  draft: NonNullable<WorldEntityDraftPayload["draft"]>,
+  defaultVisibility: EntityVisibility,
+): EditorState {
+  return {
+    id: draft.id,
+    name: draft.name,
+    entityType: draft.entityType,
+    visibility: draft.visibility ?? defaultVisibility,
+    aliasesText: draft.aliases.join(", "),
+    tagsText: draft.tags.join(", "),
+    body: draft.body,
+    fields: Object.entries(draft.fields).map(([key, value]) => ({
+      key,
+      value,
+    })),
+    media: draft.media,
+    relationships: draft.relationships.map((relationship) => ({
+      type: relationship.type,
+      target: relationship.target,
+    })),
+  };
+}
+
 function buildSaveRequest(editor: EditorState): WorldBrowserEntitySaveRequest {
   return {
     id: editor.id,
@@ -182,6 +242,8 @@ export function App() {
   const typeFilterId = useId();
   const tagFilterId = useId();
   const searchId = useId();
+  const searchModeId = useId();
+  const proseActionId = useId();
   const [isPending, startTransition] = useTransition();
   const [payload, setPayload] = useState<WorldBrowserPayload | null>(null);
   const [session, setSession] = useState<AuthSessionPayload | null>(null);
@@ -197,6 +259,7 @@ export function App() {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchMode, setSearchMode] = useState<WorldSearchMode>("keyword");
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [loginEmail, setLoginEmail] = useState("owner@worldforge.local");
   const [loginPassword, setLoginPassword] = useState("worldforge-owner");
@@ -212,6 +275,15 @@ export function App() {
   const [isLoadingAISettings, setIsLoadingAISettings] = useState(false);
   const [isSavingAISettings, setIsSavingAISettings] = useState(false);
   const [isLoadingAIContext, setIsLoadingAIContext] = useState(false);
+  const [semanticResult, setSemanticResult] = useState<WorldSemanticSearchPayload | null>(null);
+  const [isLoadingSemanticSearch, setIsLoadingSemanticSearch] = useState(false);
+  const [draftProvenance, setDraftProvenance] = useState<DraftProvenanceState | null>(null);
+  const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
+  const [selectedProseAction, setSelectedProseAction] = useState<WorldEditorProseAction>("summarize");
+  const [proseSuggestion, setProseSuggestion] = useState<ProseSuggestionState | null>(null);
+  const [isRequestingProse, setIsRequestingProse] = useState(false);
+  const [editorSuggestions, setEditorSuggestions] = useState<EditorSuggestionState | null>(null);
+  const [isLoadingEditorSuggestions, setIsLoadingEditorSuggestions] = useState(false);
 
   async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
@@ -245,7 +317,7 @@ export function App() {
 
       try {
         const params = new URLSearchParams();
-        if (searchQuery.trim()) {
+        if (searchMode === "keyword" && searchQuery.trim()) {
           params.set("q", searchQuery.trim());
         }
 
@@ -260,6 +332,9 @@ export function App() {
               setSelectedEntityId(null);
               setDetail(null);
               setEditorState(null);
+              setDraftProvenance(null);
+              setProseSuggestion(null);
+              setEditorSuggestions(null);
               setIsEditing(false);
             });
           }
@@ -304,7 +379,56 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [isEditing, refreshVersion, searchQuery]);
+  }, [isEditing, refreshVersion, searchMode, searchQuery]);
+
+  useEffect(() => {
+    if (!session) {
+      setSemanticResult(null);
+      return;
+    }
+
+    if (searchMode !== "semantic") {
+      setSemanticResult(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingSemanticSearch(true);
+
+    async function loadSemanticSearch() {
+      try {
+        const params = new URLSearchParams();
+        if (searchQuery.trim()) {
+          params.set("q", searchQuery.trim());
+        }
+
+        const response = await apiFetch(`/api/world/semantic-search${params.size ? `?${params.toString()}` : ""}`);
+        if (!response.ok) {
+          const body = (await response.json()) as { error?: string };
+          throw new Error(body.error ?? "Unable to run semantic search.");
+        }
+
+        const nextResult = (await response.json()) as WorldSemanticSearchPayload;
+        if (!cancelled) {
+          setSemanticResult(nextResult);
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingSemanticSearch(false);
+        }
+      }
+    }
+
+    void loadSemanticSearch();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchMode, searchQuery, session, refreshVersion]);
 
   useEffect(() => {
     if (!session?.canManageAccounts) {
@@ -484,8 +608,8 @@ export function App() {
     };
   }, [isEditing, selectedEntityId, session]);
 
-  const filteredEntities = useMemo(() => {
-    const entities = payload?.entities ?? [];
+  const displayedEntities = useMemo(() => {
+    const entities = searchMode === "semantic" ? semanticResult?.matches ?? [] : payload?.entities ?? [];
 
     return entities.filter((entity) => {
       if (typeFilter !== "all" && entity.entityType !== typeFilter) {
@@ -498,22 +622,29 @@ export function App() {
 
       return true;
     });
-  }, [payload, tagFilter, typeFilter]);
+  }, [payload, searchMode, semanticResult, tagFilter, typeFilter]);
 
   useEffect(() => {
     if (isEditing) {
       return;
     }
 
-    if (!filteredEntities.length) {
+    if (!displayedEntities.length) {
       setSelectedEntityId(null);
       return;
     }
 
-    if (!selectedEntityId || !filteredEntities.some((entity) => entity.id === selectedEntityId)) {
-      setSelectedEntityId(filteredEntities[0]?.id ?? null);
+    if (!selectedEntityId || !displayedEntities.some((entity) => entity.id === selectedEntityId)) {
+      setSelectedEntityId(displayedEntities[0]?.id ?? null);
     }
-  }, [filteredEntities, isEditing, selectedEntityId]);
+  }, [displayedEntities, isEditing, selectedEntityId]);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setProseSuggestion(null);
+      setEditorSuggestions(null);
+    }
+  }, [isEditing, selectedEntityId]);
 
   async function handleSaveEditor(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -547,7 +678,7 @@ export function App() {
 
       const saved = (await response.json()) as WorldBrowserEntityDetail;
       const params = new URLSearchParams();
-      if (searchQuery.trim()) {
+      if (searchMode === "keyword" && searchQuery.trim()) {
         params.set("q", searchQuery.trim());
       }
 
@@ -564,6 +695,9 @@ export function App() {
         setSession(refreshedPayload.session);
         setDetail(saved);
         setEditorState(buildEditorState(saved));
+        setDraftProvenance(null);
+        setProseSuggestion(null);
+        setEditorSuggestions(null);
         setSelectedEntityId(saved.id);
         setIsEditing(false);
       });
@@ -623,6 +757,9 @@ export function App() {
         setAccounts([]);
         setDetail(null);
         setEditorState(null);
+        setDraftProvenance(null);
+        setProseSuggestion(null);
+        setEditorSuggestions(null);
         setSelectedEntityId(null);
         setIsEditing(false);
       });
@@ -722,6 +859,235 @@ export function App() {
     }
   }
 
+  async function generateDraft(request: {
+    entityType: WorldEntityType;
+    proposedName?: string;
+    unresolvedTargetText?: string;
+    sourceEntityId?: string;
+  }) {
+    setError(null);
+    setIsGeneratingDraft(true);
+
+    try {
+      const response = await apiFetch("/api/world/entity-drafts", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to generate draft entity.");
+      }
+
+      const payload = (await response.json()) as WorldEntityDraftPayload;
+      if (payload.status !== "ready" || !payload.draft || !payload.provenance) {
+        throw new Error(payload.unavailableReason ?? "Draft generation is unavailable.");
+      }
+
+      const draft = payload.draft;
+      const provenance = payload.provenance;
+
+      startTransition(() => {
+        setIsEditing(true);
+        setSelectedEntityId(null);
+        setDetail(null);
+        setDraftProvenance(provenance);
+        setProseSuggestion(null);
+        setEditorSuggestions(null);
+        setEditorState(buildEditorStateFromDraft(draft, defaultVisibleOption(session)));
+      });
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsGeneratingDraft(false);
+    }
+  }
+
+  async function handleRequestProseAssistance() {
+    if (!editorState) {
+      return;
+    }
+
+    setError(null);
+    setIsRequestingProse(true);
+
+    try {
+      const response = await apiFetch("/api/world/prose-assistance", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(
+          buildEditorProseAssistRequest(
+            {
+              entityId: editorState.id,
+              name: editorState.name,
+              entityType: editorState.entityType,
+              body: editorState.body,
+            },
+            selectedProseAction,
+          ),
+        ),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to generate prose assistance.");
+      }
+
+      const payload = (await response.json()) as WorldEditorProseAssistPayload;
+      if (payload.status !== "ready" || !payload.suggestedText) {
+        throw new Error(payload.unavailableReason ?? "Prose assistance is unavailable.");
+      }
+
+      setProseSuggestion({
+        status: "ready",
+        action: payload.action,
+        applyMode: payload.applyMode,
+        summary: payload.summary,
+        providerLabel: payload.providerLabel,
+        sourceText: payload.sourceText,
+        suggestedText: payload.suggestedText,
+        contextNotes: payload.contextNotes,
+      });
+    } catch (caughtError) {
+      setProseSuggestion(null);
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsRequestingProse(false);
+    }
+  }
+
+  function handleApplyProseSuggestion() {
+    if (!editorState || !proseSuggestion) {
+      return;
+    }
+
+    setEditorState({
+      ...editorState,
+      body: applyEditorProseResult(editorState.body, proseSuggestion),
+    });
+    setProseSuggestion(rejectEditorProseResult());
+  }
+
+  function handleRejectProseSuggestion() {
+    setProseSuggestion(rejectEditorProseResult());
+  }
+
+  async function handleReviewEditorSuggestions() {
+    if (!editorState) {
+      return;
+    }
+
+    setError(null);
+    setIsLoadingEditorSuggestions(true);
+
+    try {
+      const response = await apiFetch("/api/world/editor-suggestions", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(
+          buildEditorSuggestionRequest({
+            entityId: editorState.id,
+            name: editorState.name,
+            entityType: editorState.entityType,
+            body: editorState.body,
+            relationships: editorState.relationships,
+            fields: editorState.fields,
+          }),
+        ),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to review suggestions.");
+      }
+
+      const payload = (await response.json()) as WorldEditorSuggestionPayload;
+      if (payload.status !== "ready") {
+        throw new Error(payload.unavailableReason ?? "Suggestions are unavailable.");
+      }
+
+      setEditorSuggestions({
+        status: "ready",
+        providerLabel: payload.providerLabel,
+        summary: payload.summary,
+        linkSuggestions: payload.linkSuggestions,
+        relationshipSuggestions: payload.relationshipSuggestions,
+        ...(payload.summarySuggestion ? { summarySuggestion: payload.summarySuggestion } : {}),
+      });
+    } catch (caughtError) {
+      setEditorSuggestions(null);
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsLoadingEditorSuggestions(false);
+    }
+  }
+
+  function dismissLinkSuggestion(suggestionId: string) {
+    setEditorSuggestions((current) =>
+      current
+        ? { ...current, linkSuggestions: current.linkSuggestions.filter((suggestion) => suggestion.id !== suggestionId) }
+        : current,
+    );
+  }
+
+  function dismissRelationshipSuggestion(suggestionId: string) {
+    setEditorSuggestions((current) =>
+      current
+        ? {
+            ...current,
+            relationshipSuggestions: current.relationshipSuggestions.filter((suggestion) => suggestion.id !== suggestionId),
+          }
+        : current,
+    );
+  }
+
+  function dismissSummarySuggestion() {
+    setEditorSuggestions((current) => (current ? { ...current, summarySuggestion: undefined } : current));
+  }
+
+  function handleApplyLinkSuggestion(suggestion: WorldEditorLinkSuggestion) {
+    setEditorState((current) =>
+      current
+        ? {
+            ...current,
+            body: applyLinkSuggestion(current.body, suggestion),
+          }
+        : current,
+    );
+    dismissLinkSuggestion(suggestion.id);
+  }
+
+  function handleApplyRelationshipSuggestion(suggestion: WorldEditorRelationshipSuggestion) {
+    setEditorState((current) =>
+      current
+        ? {
+            ...current,
+            relationships: applyRelationshipSuggestion(current.relationships, suggestion),
+          }
+        : current,
+    );
+    dismissRelationshipSuggestion(suggestion.id);
+  }
+
+  function handleApplySummarySuggestion(suggestion: WorldEditorSummarySuggestion) {
+    setEditorState((current) =>
+      current
+        ? {
+            ...current,
+            fields: applySummarySuggestion(current.fields, suggestion),
+          }
+        : current,
+    );
+    dismissSummarySuggestion();
+  }
+
   async function handleSaveAISettings(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -761,6 +1127,11 @@ export function App() {
       setIsSavingAISettings(false);
     }
   }
+
+  const prosePreviewText =
+    proseSuggestion && editorState ? previewEditorProseResult(editorState.body, proseSuggestion) : null;
+  const detailReferenceSummary =
+    detail && typeof detail.fields.reference_summary === "string" ? detail.fields.reference_summary : null;
 
   if (!session) {
     return (
@@ -863,8 +1234,24 @@ export function App() {
               id={searchId}
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search names, tags, and body text"
+              placeholder={
+                searchMode === "semantic"
+                  ? "Ask a lore question like 'Who governs the river trade city?'"
+                  : "Search names, tags, and body text"
+              }
             />
+          </label>
+
+          <label className="field" htmlFor={searchModeId}>
+            <span>Search Mode</span>
+            <select
+              id={searchModeId}
+              value={searchMode}
+              onChange={(event) => setSearchMode(event.target.value as WorldSearchMode)}
+            >
+              <option value="keyword">Keyword Search</option>
+              <option value="semantic">Semantic Search</option>
+            </select>
           </label>
 
           <label className="field" htmlFor={typeFilterId}>
@@ -896,8 +1283,18 @@ export function App() {
           </label>
 
           <div className="browser-meta">
-            <span>{filteredEntities.length} visible entries</span>
-            <span>{isLoadingWorld ? "Refreshing..." : "Session persisted"}</span>
+            <span>{displayedEntities.length} visible entries</span>
+            <span>
+              {searchMode === "semantic"
+                ? isLoadingSemanticSearch
+                  ? "Searching semantically..."
+                  : semanticResult?.status === "unavailable"
+                    ? "Semantic mode unavailable"
+                    : "Semantic mode"
+                : isLoadingWorld
+                  ? "Refreshing..."
+                  : "Session persisted"}
+            </span>
             {error ? <span className="error-inline">{error}</span> : null}
           </div>
 
@@ -908,14 +1305,31 @@ export function App() {
               setIsEditing(true);
               setSelectedEntityId(null);
               setDetail(null);
+              setDraftProvenance(null);
+              setProseSuggestion(null);
+              setEditorSuggestions(null);
               setEditorState(buildNewEditorState(defaultVisibleOption(session)));
             }}
           >
             New Entity
           </button>
 
+          <button
+            type="button"
+            className="secondary-action"
+            disabled={isGeneratingDraft || !aiSettings?.provider.status.configured}
+            onClick={() =>
+              void generateDraft({
+                entityType: typeFilter === "all" ? "lore_article" : typeFilter,
+                proposedName: searchQuery.trim() || undefined,
+              })
+            }
+          >
+            {isGeneratingDraft ? "Generating Draft..." : "Generate Draft"}
+          </button>
+
           <ul className="entity-list">
-            {filteredEntities.map((entity) => (
+            {displayedEntities.map((entity) => (
               <li key={entity.id}>
                 <button
                   type="button"
@@ -940,7 +1354,15 @@ export function App() {
             ))}
           </ul>
 
-          {!filteredEntities.length ? <p className="placeholder">No entities match the current filters.</p> : null}
+          {!displayedEntities.length ? (
+            <p className="placeholder">
+              {searchMode === "semantic"
+                ? semanticResult?.status === "unavailable"
+                  ? semanticResult.unavailableReason
+                  : "No semantic matches surfaced for the current question."
+                : "No entities match the current filters."}
+            </p>
+          ) : null}
 
           <section className="detail-section">
             <div className="section-row">
@@ -954,6 +1376,20 @@ export function App() {
                     <strong>{reference.targetText}</strong>
                     <span>Referenced by {reference.sourceName}</span>
                     <p>{reference.referenceKind === "wikilink" ? "Unresolved wikilink" : "Unresolved relationship target"}</p>
+                    <button
+                      type="button"
+                      className="secondary-action compact"
+                      disabled={isGeneratingDraft || !aiSettings?.provider.status.configured}
+                      onClick={() =>
+                        void generateDraft({
+                          entityType: "location",
+                          unresolvedTargetText: reference.targetText,
+                          sourceEntityId: reference.sourceEntityId,
+                        })
+                      }
+                    >
+                      Draft From Stub
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -1025,6 +1461,25 @@ export function App() {
                     <h3 className="detail-title">{editorState.name || "New Entity"}</h3>
                   </div>
                 </div>
+
+                {draftProvenance ? (
+                  <section className="detail-section">
+                    <div className="section-row">
+                      <h3>Draft Provenance</h3>
+                      <span className="queue-count">{draftProvenance.mode.replace(/_/g, " ")}</span>
+                    </div>
+                    <p className="placeholder">{draftProvenance.summary}</p>
+                    <p>
+                      <strong>Provider:</strong> {draftProvenance.providerLabel} • <strong>Approval required:</strong>{" "}
+                      {draftProvenance.approvalRequired ? "Yes" : "No"}
+                    </p>
+                    {draftProvenance.unresolvedTargetText ? (
+                      <p>
+                        <strong>Stub target:</strong> {draftProvenance.unresolvedTargetText}
+                      </p>
+                    ) : null}
+                  </section>
+                ) : null}
 
                 <label className="field">
                   <span>Name</span>
@@ -1104,11 +1559,12 @@ export function App() {
                     <button
                       type="button"
                       className="secondary-action compact"
-                      onClick={() =>
+                      onClick={() => {
+                        setEditorSuggestions(null);
                         setEditorState((current) =>
                           current ? { ...current, fields: [...current.fields, { key: "", value: "" }] } : current,
-                        )
-                      }
+                        );
+                      }}
                     >
                       Add Field
                     </button>
@@ -1119,7 +1575,8 @@ export function App() {
                         <input
                           value={field.key}
                           placeholder="field_key"
-                          onChange={(event) =>
+                          onChange={(event) => {
+                            setEditorSuggestions(null);
                             setEditorState((current) =>
                               current
                                 ? {
@@ -1129,13 +1586,14 @@ export function App() {
                                     ),
                                   }
                                 : current,
-                            )
-                          }
+                            );
+                          }}
                         />
                         <input
                           value={field.value}
                           placeholder="Field value"
-                          onChange={(event) =>
+                          onChange={(event) => {
+                            setEditorSuggestions(null);
                             setEditorState((current) =>
                               current
                                 ? {
@@ -1145,8 +1603,8 @@ export function App() {
                                     ),
                                   }
                                 : current,
-                            )
-                          }
+                            );
+                          }}
                         />
                       </div>
                     ))}
@@ -1159,7 +1617,8 @@ export function App() {
                     <button
                       type="button"
                       className="secondary-action compact"
-                      onClick={() =>
+                      onClick={() => {
+                        setEditorSuggestions(null);
                         setEditorState((current) =>
                           current
                             ? {
@@ -1167,8 +1626,8 @@ export function App() {
                                 relationships: [...current.relationships, { type: "", target: "" }],
                               }
                             : current,
-                        )
-                      }
+                        );
+                      }}
                     >
                       Add Relationship
                     </button>
@@ -1179,7 +1638,8 @@ export function App() {
                         <input
                           value={relationship.type}
                           placeholder="relationship_type"
-                          onChange={(event) =>
+                          onChange={(event) => {
+                            setEditorSuggestions(null);
                             setEditorState((current) =>
                               current
                                 ? {
@@ -1189,13 +1649,14 @@ export function App() {
                                     ),
                                   }
                                 : current,
-                            )
-                          }
+                            );
+                          }}
                         />
                         <input
                           value={relationship.target}
                           placeholder="Target entity"
-                          onChange={(event) =>
+                          onChange={(event) => {
+                            setEditorSuggestions(null);
                             setEditorState((current) =>
                               current
                                 ? {
@@ -1205,8 +1666,8 @@ export function App() {
                                     ),
                                   }
                                 : current,
-                            )
-                          }
+                            );
+                          }}
                         />
                       </div>
                     ))}
@@ -1218,11 +1679,198 @@ export function App() {
                   <textarea
                     rows={10}
                     value={editorState.body}
-                    onChange={(event) =>
-                      setEditorState((current) => (current ? { ...current, body: event.target.value } : current))
-                    }
+                    onChange={(event) => {
+                      setProseSuggestion(null);
+                      setEditorSuggestions(null);
+                      setEditorState((current) => (current ? { ...current, body: event.target.value } : current));
+                    }}
                   />
                 </label>
+
+                <section className="detail-section">
+                  <div className="section-row">
+                    <div>
+                      <h3>Suggestions</h3>
+                      <p className="placeholder">
+                        Review calm link, relationship, and summary suggestions without changing canon until you accept them.
+                      </p>
+                    </div>
+                    <span className="queue-count">
+                      {editorSuggestions
+                        ? editorSuggestions.linkSuggestions.length +
+                          editorSuggestions.relationshipSuggestions.length +
+                          (editorSuggestions.summarySuggestion ? 1 : 0)
+                        : "idle"}
+                    </span>
+                  </div>
+
+                  <div className="editor-actions">
+                    <button
+                      type="button"
+                      onClick={() => void handleReviewEditorSuggestions()}
+                      disabled={isLoadingEditorSuggestions || !editorState.body.trim()}
+                    >
+                      {isLoadingEditorSuggestions ? "Reviewing..." : "Review Suggestions"}
+                    </button>
+                  </div>
+
+                  {!aiSettings?.provider.status.configured ? (
+                    <p className="placeholder">Configure the AI baseline first to enable editor suggestions.</p>
+                  ) : null}
+
+                  {editorSuggestions ? (
+                    <div className="stack">
+                      <p className="placeholder">{editorSuggestions.summary}</p>
+
+                      {editorSuggestions.summarySuggestion ? (
+                        <article className="suggestion-card">
+                          <h4>{editorSuggestions.summarySuggestion.label}</h4>
+                          <p className="body-copy">{editorSuggestions.summarySuggestion.value}</p>
+                          <p className="placeholder">{editorSuggestions.summarySuggestion.reason}</p>
+                          <div className="editor-actions">
+                            <button
+                              type="button"
+                              onClick={() => handleApplySummarySuggestion(editorSuggestions.summarySuggestion!)}
+                            >
+                              Apply Summary
+                            </button>
+                            <button type="button" className="secondary-action" onClick={dismissSummarySuggestion}>
+                              Dismiss
+                            </button>
+                          </div>
+                        </article>
+                      ) : null}
+
+                      {editorSuggestions.linkSuggestions.map((suggestion) => (
+                        <article key={suggestion.id} className="suggestion-card">
+                          <h4>Link Suggestion</h4>
+                          <p>
+                            Replace <strong>{suggestion.matchedText}</strong> with <strong>{suggestion.replacementText}</strong>.
+                          </p>
+                          <p className="placeholder">{suggestion.reason}</p>
+                          <div className="editor-actions">
+                            <button type="button" onClick={() => handleApplyLinkSuggestion(suggestion)}>
+                              Apply Link
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-action"
+                              onClick={() => dismissLinkSuggestion(suggestion.id)}
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+
+                      {editorSuggestions.relationshipSuggestions.map((suggestion) => (
+                        <article key={suggestion.id} className="suggestion-card">
+                          <h4>Relationship Suggestion</h4>
+                          <p>
+                            Add <strong>{formatFieldLabel(suggestion.relationship.type)}</strong> {"->"}{" "}
+                            <strong>{suggestion.relationship.target}</strong>.
+                          </p>
+                          <p className="placeholder">{suggestion.reason}</p>
+                          <div className="editor-actions">
+                            <button type="button" onClick={() => handleApplyRelationshipSuggestion(suggestion)}>
+                              Apply Relationship
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-action"
+                              onClick={() => dismissRelationshipSuggestion(suggestion.id)}
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+
+                <section className="detail-section prose-assistance">
+                  <div className="section-row">
+                    <div>
+                      <h3>Prose Assistance</h3>
+                      <p className="placeholder">Preview a bounded suggestion, then apply or reject it explicitly.</p>
+                    </div>
+                    <span className="queue-count">{proseSuggestion ? "preview" : "idle"}</span>
+                  </div>
+
+                  <div className="prose-assist-controls">
+                    <label className="field">
+                      <span>Action</span>
+                      <select
+                        id={proseActionId}
+                        value={selectedProseAction}
+                        onChange={(event) => setSelectedProseAction(event.target.value as WorldEditorProseAction)}
+                      >
+                        {Object.entries(proseActionLabels).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <button
+                      type="button"
+                      className="secondary-action"
+                      onClick={() => void handleRequestProseAssistance()}
+                      disabled={isRequestingProse || !editorState.body.trim()}
+                    >
+                      {isRequestingProse ? "Generating Preview..." : "Preview Suggestion"}
+                    </button>
+                  </div>
+
+                  {!aiSettings?.provider.status.configured ? (
+                    <p className="placeholder">
+                      Configure the AI baseline first to enable prose assistance inside the editor.
+                    </p>
+                  ) : null}
+
+                  {proseSuggestion && prosePreviewText ? (
+                    <div className="prose-preview-stack">
+                      <p className="placeholder">
+                        {proseSuggestion.summary} Current body stays unchanged until you apply this proposal.
+                      </p>
+                      <p>
+                        <strong>Provider:</strong> {proseSuggestion.providerLabel} • <strong>Apply mode:</strong>{" "}
+                        {proseSuggestion.applyMode}
+                      </p>
+
+                      <div className="prose-preview-grid">
+                        <article className="prose-preview-card">
+                          <h4>Current Body</h4>
+                          <p className="body-copy">{editorState.body}</p>
+                        </article>
+                        <article className="prose-preview-card">
+                          <h4>Proposed Result</h4>
+                          <p className="body-copy">{prosePreviewText}</p>
+                        </article>
+                      </div>
+
+                      <div className="prose-context-grid">
+                        {proseSuggestion.contextNotes.map((note) => (
+                          <article key={`${note.label}-${note.value}`} className="prose-context-card">
+                            <h4>{note.label}</h4>
+                            <p className="body-copy">{note.value}</p>
+                          </article>
+                        ))}
+                      </div>
+
+                      <div className="editor-actions">
+                        <button type="button" onClick={handleApplyProseSuggestion}>
+                          Apply Suggestion
+                        </button>
+                        <button type="button" className="secondary-action" onClick={handleRejectProseSuggestion}>
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </section>
 
                 <section className="detail-section">
                   <div className="section-row">
@@ -1267,6 +1915,9 @@ export function App() {
                     className="secondary-action"
                     onClick={() => {
                       setIsEditing(false);
+                      setDraftProvenance(null);
+                      setProseSuggestion(null);
+                      setEditorSuggestions(null);
                       if (detail) {
                         setEditorState(buildEditorState(detail));
                       }
@@ -1283,6 +1934,7 @@ export function App() {
                     <p className="detail-type">{typeLabels[detail.entityType]}</p>
                     <h3 className="detail-title">{detail.name}</h3>
                     <p className="summary">{detail.excerpt}</p>
+                    {detailReferenceSummary ? <p className="placeholder">{detailReferenceSummary}</p> : null}
                   </div>
                   <span className="visibility-chip">{detail.visibility.replace(/_/g, " ")}</span>
                 </div>
@@ -1292,6 +1944,8 @@ export function App() {
                     type="button"
                     onClick={() => {
                       setEditorState(buildEditorState(detail));
+                      setProseSuggestion(null);
+                      setEditorSuggestions(null);
                       setIsEditing(true);
                     }}
                   >
@@ -1416,6 +2070,43 @@ export function App() {
               <p className="placeholder">Select an entity to inspect backlinks and source location.</p>
             )}
           </article>
+
+          {searchMode === "semantic" ? (
+            <article className="panel">
+              <header className="panel-header">
+                <h2>Semantic Answer</h2>
+                <p>Citation-backed answers stay separate from deterministic keyword search.</p>
+              </header>
+              {semanticResult ? (
+                <div className="stack">
+                  {semanticResult.status === "unavailable" ? (
+                    <p className="placeholder">{semanticResult.unavailableReason}</p>
+                  ) : semanticResult.answer ? (
+                    <>
+                      <p className="body-copy">{semanticResult.answer}</p>
+                      <p>
+                        <strong>Uncertainty:</strong> {semanticResult.uncertainty} - {semanticResult.uncertaintyReason}
+                      </p>
+                      <ul className="sources">
+                        {semanticResult.citations.map((citation) => (
+                          <li key={citation.entityId}>
+                            <strong>{citation.entityName}</strong>
+                            <span>{typeLabels[citation.entityType]}</span>
+                            <p>{citation.excerpt}</p>
+                            <p className="path-copy">{citation.path}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : (
+                    <p className="placeholder">Ask a lore question to see a semantic answer with citations.</p>
+                  )}
+                </div>
+              ) : (
+                <p className="placeholder">Loading semantic search state...</p>
+              )}
+            </article>
+          ) : null}
 
           <article className="panel">
             <header className="panel-header">

@@ -18,6 +18,122 @@ export type WorldBrowserEntitySummary = {
   excerpt: string;
 };
 
+export type WorldSearchMode = "keyword" | "semantic";
+
+export type WorldSemanticCitation = {
+  entityId: string;
+  entityName: string;
+  entityType: WorldEntityType;
+  path: string;
+  excerpt: string;
+  matchedTerms: string[];
+};
+
+export type WorldSemanticSearchPayload = {
+  mode: "semantic";
+  query: string;
+  status: "ready" | "unavailable";
+  unavailableReason?: string;
+  answer: string | null;
+  uncertainty: "grounded" | "limited" | "insufficient";
+  uncertaintyReason: string;
+  citations: WorldSemanticCitation[];
+  matches: WorldBrowserEntitySummary[];
+};
+
+export type WorldEntityDraftRequest = {
+  entityType: WorldEntityType;
+  proposedName?: string;
+  unresolvedTargetText?: string;
+  sourceEntityId?: string;
+};
+
+export type WorldEntityDraftProvenance = {
+  mode: "new_entity" | "stub_fill";
+  sourceEntityId?: string;
+  sourceEntityName?: string;
+  unresolvedTargetText?: string;
+  providerLabel: string;
+  approvalRequired: boolean;
+  summary: string;
+};
+
+export type WorldEntityDraftPayload = {
+  status: "ready" | "unavailable";
+  unavailableReason?: string;
+  draft?: WorldBrowserEntitySaveRequest;
+  provenance?: WorldEntityDraftProvenance;
+};
+
+export type WorldEditorProseAction = "summarize" | "rephrase" | "continue";
+
+export type WorldEditorProseAssistRequest = {
+  action: WorldEditorProseAction;
+  entityId?: string;
+  name: string;
+  entityType: WorldEntityType;
+  body: string;
+};
+
+export type WorldEditorProseContextNote = {
+  label: string;
+  value: string;
+};
+
+export type WorldEditorProseAssistPayload = {
+  status: "ready" | "unavailable";
+  unavailableReason?: string;
+  action: WorldEditorProseAction;
+  applyMode: "replace" | "append";
+  summary: string;
+  providerLabel?: string;
+  sourceText: string;
+  suggestedText?: string;
+  contextNotes: WorldEditorProseContextNote[];
+};
+
+export type WorldEditorSuggestionRequest = {
+  entityId?: string;
+  name: string;
+  entityType: WorldEntityType;
+  body: string;
+  relationships: EntityRelationshipReference[];
+  fields: Record<string, string>;
+};
+
+export type WorldEditorLinkSuggestion = {
+  id: string;
+  targetEntityId: string;
+  targetName: string;
+  matchedText: string;
+  replacementText: string;
+  reason: string;
+};
+
+export type WorldEditorRelationshipSuggestion = {
+  id: string;
+  relationship: EntityRelationshipReference;
+  reason: string;
+};
+
+export type WorldEditorSummarySuggestion = {
+  id: string;
+  fieldKey: string;
+  label: string;
+  value: string;
+  reason: string;
+};
+
+export type WorldEditorSuggestionPayload = {
+  status: "ready" | "unavailable";
+  unavailableReason?: string;
+  providerLabel?: string;
+  summary: string;
+  linkSuggestions: WorldEditorLinkSuggestion[];
+  relationshipSuggestions: WorldEditorRelationshipSuggestion[];
+  summarySuggestion?: WorldEditorSummarySuggestion;
+};
+
 export type WorldBrowserEntityDetail = {
   id: string;
   name: string;

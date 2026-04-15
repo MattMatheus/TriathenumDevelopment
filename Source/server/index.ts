@@ -10,12 +10,19 @@ import type {
   ActorReactionRequest,
   AuthAccountProvisionRequest,
   AuthLoginRequest,
+  WorldEditorSuggestionRequest,
+  WorldEditorProseAssistRequest,
   WorldBrowserMediaUploadRequest,
   WorldBrowserEntitySaveRequest,
 } from "../contracts/index.js";
 import { AISettingsError, FileSystemAISettingsStore, loadAIWorldContext } from "./ai-service.js";
 import { ActorReactionError, createActorReactionResponse, defaultVaultRoot } from "./actor-reaction-service.js";
+import type { WorldEntityDraftRequest } from "../contracts/index.js";
 import { AuthError, FileSystemAuthStore } from "./auth-service.js";
+import { generateWorldEntityDraft } from "./draft-generation-service.js";
+import { generateEditorSuggestions } from "./editor-suggestion-service.js";
+import { assistEditorProse } from "./prose-assistance-service.js";
+import { searchWorldSemantically } from "./semantic-search-service.js";
 import {
   attachMediaToEntity,
   defaultWorldRoot,
@@ -294,6 +301,29 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (request.method === "GET" && requestUrl.pathname === "/api/world/semantic-search") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const payload = await searchWorldSemantically(worldRoot, viewer, requestUrl.searchParams.get("q") ?? "");
+      sendJson(response, 200, payload, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to run semantic search.",
+      });
+    }
+
+    return;
+  }
+
   if (
     request.method === "POST" &&
     requestUrl.pathname.startsWith("/api/world/entities/") &&
@@ -427,6 +457,96 @@ const server = createServer(async (request, response) => {
 
       sendJson(response, 500, {
         error: error instanceof Error ? error.message : "Unable to save entity.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/world/entity-drafts") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    let rawBody = "";
+
+    for await (const chunk of request) {
+      rawBody += chunk;
+    }
+
+    try {
+      const payload = JSON.parse(rawBody) as WorldEntityDraftRequest;
+      const result = await generateWorldEntityDraft(worldRoot, viewer, payload);
+      sendJson(response, 200, result, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to generate draft entity.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/world/prose-assistance") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    let rawBody = "";
+
+    for await (const chunk of request) {
+      rawBody += chunk;
+    }
+
+    try {
+      const payload = JSON.parse(rawBody) as WorldEditorProseAssistRequest;
+      const result = await assistEditorProse(worldRoot, viewer, payload);
+      sendJson(response, 200, result, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to generate prose assistance.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/world/editor-suggestions") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    let rawBody = "";
+
+    for await (const chunk of request) {
+      rawBody += chunk;
+    }
+
+    try {
+      const payload = JSON.parse(rawBody) as WorldEditorSuggestionRequest;
+      const result = await generateEditorSuggestions(worldRoot, viewer, payload);
+      sendJson(response, 200, result, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to review editor suggestions.",
       });
     }
 

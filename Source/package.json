@@ -6,7 +6,12 @@
     "dev:app": "vite",
     "dev:server": "tsx server/index.ts",
     "diagnose:retrieval": "node --import tsx ../Tools/retrieval-diagnostics.ts",
+    "browser:agent": "node ./scripts/run-agent-browser.mjs",
     "build": "vite build",
+    "test:e2e": "node ./scripts/run-playwright.mjs test",
+    "test:e2e:headed": "node ./scripts/run-playwright.mjs test --headed",
+    "test:e2e:ui": "node ./scripts/run-playwright.mjs test --ui",
+    "test:e2e:install": "node ./scripts/run-playwright.mjs install chromium webkit",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },
@@ -15,6 +20,7 @@
     "react-dom": "^19.2.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

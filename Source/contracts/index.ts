@@ -35,8 +35,23 @@ export type {
 } from "./auth.js";
 
 export type {
+  WorldEditorProseAction,
+  WorldEditorProseAssistPayload,
+  WorldEditorProseAssistRequest,
+  WorldEditorProseContextNote,
+  WorldEditorLinkSuggestion,
+  WorldEditorRelationshipSuggestion,
+  WorldEditorSuggestionPayload,
+  WorldEditorSuggestionRequest,
+  WorldEditorSummarySuggestion,
+  WorldEntityDraftPayload,
+  WorldEntityDraftProvenance,
+  WorldEntityDraftRequest,
   WorldBrowserEntityDetail,
   WorldBrowserMediaUploadRequest,
+  WorldSearchMode,
+  WorldSemanticCitation,
+  WorldSemanticSearchPayload,
   WorldBrowserEntitySaveRequest,
   WorldBrowserEntitySummary,
   WorldBrowserPayload,

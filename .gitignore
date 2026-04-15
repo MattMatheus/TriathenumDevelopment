@@ -1,5 +1,10 @@
 Triathenum/
 .DS_Store
+node_modules/
 Source/dist/
 Source/node_modules/
+Source/.browser/
+Source/.playwright/
+Source/playwright-report/
+Source/test-results/
 .worldforge/
