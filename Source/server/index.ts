@@ -23,6 +23,7 @@ import { assertSafeOwnerBootstrap, AuthError, FileSystemAuthStore } from "./auth
 import { PathContainmentError, RequestBodyError, readRequestBody, resolveStaticAssetPath } from "./http-utils.js";
 import { generateWorldEntityDraft } from "./draft-generation-service.js";
 import { generateEditorSuggestions } from "./editor-suggestion-service.js";
+import { loadEntityGraph } from "./graph-service.js";
 import { assistEditorProse } from "./prose-assistance-service.js";
 import { reviewWorldConsistency } from "./consistency-review-service.js";
 import { searchWorldSemantically } from "./semantic-search-service.js";
@@ -605,6 +606,40 @@ const server = createServer(async (request, response) => {
 
       sendJson(response, 500, {
         error: error instanceof Error ? error.message : "Unable to load the timeline workspace.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/world/graph") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    const entityId = requestUrl.searchParams.get("entityId")?.trim();
+    if (!entityId) {
+      sendJson(response, 400, { error: "An entityId query parameter is required." }, authHeaders(session));
+      return;
+    }
+
+    try {
+      const result = await loadEntityGraph(worldRoot, viewer, entityId);
+      if (!result) {
+        sendJson(response, 404, { error: "Entity graph not found." }, authHeaders(session));
+        return;
+      }
+
+      sendJson(response, 200, result, authHeaders(session));
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to load the graph explorer.",
       });
     }
 

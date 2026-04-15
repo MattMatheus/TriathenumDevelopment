@@ -89,6 +89,31 @@ export type WorldTimelinePayload = {
   items: WorldTimelineItem[];
 };
 
+export type WorldGraphNode = {
+  entityId: string;
+  entityName: string;
+  entityType: WorldEntityType;
+  role: "center" | "neighbor";
+};
+
+export type WorldGraphEdge = {
+  id: string;
+  sourceEntityId: string;
+  targetEntityId: string;
+  label: string;
+  direction: "outbound" | "inbound";
+  summary: string;
+};
+
+export type WorldGraphPayload = {
+  scope: "entity";
+  entityId: string;
+  entityName: string;
+  summary: string;
+  nodes: WorldGraphNode[];
+  edges: WorldGraphEdge[];
+};
+
 export type WorldEntityDraftRequest = {
   entityType: WorldEntityType;
   proposedName?: string;

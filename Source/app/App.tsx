@@ -17,6 +17,7 @@ import type {
   WorldEditorSuggestionPayload,
   WorldEditorSummarySuggestion,
   WorldEntityDraftPayload,
+  WorldGraphPayload,
   WorldSearchMode,
   WorldSemanticSearchPayload,
   WorldTimelinePayload,
@@ -282,6 +283,8 @@ export function App() {
   const [isReviewingConsistency, setIsReviewingConsistency] = useState(false);
   const [timelinePayload, setTimelinePayload] = useState<WorldTimelinePayload | null>(null);
   const [isLoadingTimeline, setIsLoadingTimeline] = useState(false);
+  const [graphPayload, setGraphPayload] = useState<WorldGraphPayload | null>(null);
+  const [isLoadingGraph, setIsLoadingGraph] = useState(false);
   const canManageAISettings = session?.viewer.role === "owner";
 
   async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
@@ -443,6 +446,47 @@ export function App() {
       cancelled = true;
     };
   }, [session, refreshVersion]);
+
+  useEffect(() => {
+    if (!session || !selectedEntityId) {
+      setGraphPayload(null);
+      return;
+    }
+
+    const entityId = selectedEntityId;
+    let cancelled = false;
+    setIsLoadingGraph(true);
+
+    async function loadGraph() {
+      try {
+        const params = new URLSearchParams({ entityId });
+        const response = await apiFetch(`/api/world/graph?${params.toString()}`);
+        if (!response.ok) {
+          const body = (await response.json()) as { error?: string };
+          throw new Error(body.error ?? "Unable to load the graph explorer.");
+        }
+
+        const payload = (await response.json()) as WorldGraphPayload;
+        if (!cancelled) {
+          setGraphPayload(payload);
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingGraph(false);
+        }
+      }
+    }
+
+    void loadGraph();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEntityId, session, refreshVersion]);
 
   useEffect(() => {
     if (!session) {
@@ -2135,6 +2179,69 @@ export function App() {
               </div>
             ) : (
               <p className="placeholder">Select an entity to inspect backlinks and source location.</p>
+            )}
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Graph Explorer</h2>
+              <p>A scoped neighborhood view keeps relationship structure readable instead of exploding into a whole-world graph.</p>
+            </header>
+            {graphPayload ? (
+              <div className="stack">
+                <p className="placeholder">{graphPayload.summary}</p>
+                {graphPayload.nodes.length ? (
+                  <>
+                    <section className="detail-section">
+                      <h3>Nodes</h3>
+                      <ul className="sources">
+                        {graphPayload.nodes.map((node) => (
+                          <li key={node.entityId}>
+                            <div className="section-row">
+                              <strong>{node.entityName}</strong>
+                              <span className="queue-count">{node.role}</span>
+                            </div>
+                            <span>{typeLabels[node.entityType]}</span>
+                            {node.role === "neighbor" ? (
+                              <div className="editor-actions">
+                                <button type="button" onClick={() => setSelectedEntityId(node.entityId)}>
+                                  Pivot Here
+                                </button>
+                              </div>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                    <section className="detail-section">
+                      <h3>Edges</h3>
+                      <ul className="sources">
+                        {graphPayload.edges.map((edge) => {
+                          const sourceName =
+                            graphPayload.nodes.find((node) => node.entityId === edge.sourceEntityId)?.entityName ?? edge.sourceEntityId;
+                          const targetName =
+                            graphPayload.nodes.find((node) => node.entityId === edge.targetEntityId)?.entityName ?? edge.targetEntityId;
+                          return (
+                            <li key={edge.id}>
+                              <strong>{sourceName}</strong>
+                              <span>
+                                {edge.label} {"->"} {targetName}
+                              </span>
+                              <p>{edge.summary}</p>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
+                  </>
+                ) : (
+                  <p className="placeholder">No visible neighbors surfaced for this entity yet.</p>
+                )}
+              </div>
+            ) : (
+              <p className="placeholder">
+                {isLoadingGraph ? "Loading graph explorer..." : "Select an entity to inspect its relationship neighborhood."}
+              </p>
             )}
           </article>
 

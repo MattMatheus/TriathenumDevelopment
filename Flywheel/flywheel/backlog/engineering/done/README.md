@@ -27,3 +27,4 @@ Completed engineering stories accepted by QA.
 21. [STORY-20260415-worldforge-auth-and-rbac-hardening-followups](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260415-worldforge-auth-and-rbac-hardening-followups.md)
 22. [STORY-20260415-worldforge-phase3-canon-consistency-review](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260415-worldforge-phase3-canon-consistency-review.md)
 23. [STORY-20260415-worldforge-phase3-timeline-and-chronology-workspace](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260415-worldforge-phase3-timeline-and-chronology-workspace.md)
+24. [STORY-20260415-worldforge-phase3-relationship-graph-explorer](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260415-worldforge-phase3-relationship-graph-explorer.md)
