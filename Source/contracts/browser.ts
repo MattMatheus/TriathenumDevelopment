@@ -70,6 +70,25 @@ export type WorldConsistencyReviewPayload = {
   findings: WorldConsistencyFinding[];
 };
 
+export type WorldTimelinePrecision = "day" | "month" | "year" | "range" | "relative";
+
+export type WorldTimelineItem = {
+  entityId: string;
+  entityName: string;
+  entityType: WorldEntityType;
+  path: string;
+  title: string;
+  chronologyLabel: string;
+  precision: WorldTimelinePrecision;
+  summary: string;
+};
+
+export type WorldTimelinePayload = {
+  scope: "world";
+  summary: string;
+  items: WorldTimelineItem[];
+};
+
 export type WorldEntityDraftRequest = {
   entityType: WorldEntityType;
   proposedName?: string;

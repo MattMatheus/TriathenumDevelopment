@@ -26,6 +26,7 @@ import { generateEditorSuggestions } from "./editor-suggestion-service.js";
 import { assistEditorProse } from "./prose-assistance-service.js";
 import { reviewWorldConsistency } from "./consistency-review-service.js";
 import { searchWorldSemantically } from "./semantic-search-service.js";
+import { loadWorldTimeline } from "./timeline-service.js";
 import {
   attachMediaToEntity,
   defaultWorldRoot,
@@ -581,6 +582,29 @@ const server = createServer(async (request, response) => {
 
       sendJson(response, 500, {
         error: error instanceof Error ? error.message : "Unable to review world consistency.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/world/timeline") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const result = await loadWorldTimeline(worldRoot, viewer);
+      sendJson(response, 200, result, authHeaders(session));
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to load the timeline workspace.",
       });
     }
 

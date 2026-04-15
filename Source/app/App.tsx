@@ -19,6 +19,7 @@ import type {
   WorldEntityDraftPayload,
   WorldSearchMode,
   WorldSemanticSearchPayload,
+  WorldTimelinePayload,
   WorldBrowserEntityDetail,
   WorldBrowserMediaUploadRequest,
   WorldBrowserEntitySaveRequest,
@@ -279,6 +280,8 @@ export function App() {
   const [consistencyReview, setConsistencyReview] = useState<ConsistencyReviewState | null>(null);
   const [consistencyFindingState, setConsistencyFindingState] = useState<ConsistencyFindingState>({});
   const [isReviewingConsistency, setIsReviewingConsistency] = useState(false);
+  const [timelinePayload, setTimelinePayload] = useState<WorldTimelinePayload | null>(null);
+  const [isLoadingTimeline, setIsLoadingTimeline] = useState(false);
   const canManageAISettings = session?.viewer.role === "owner";
 
   async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
@@ -526,6 +529,45 @@ export function App() {
       cancelled = true;
     };
   }, [selectedEntityId, session, refreshVersion]);
+
+  useEffect(() => {
+    if (!session) {
+      setTimelinePayload(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingTimeline(true);
+
+    async function loadTimeline() {
+      try {
+        const response = await apiFetch("/api/world/timeline");
+        if (!response.ok) {
+          const body = (await response.json()) as { error?: string };
+          throw new Error(body.error ?? "Unable to load the timeline workspace.");
+        }
+
+        const payload = (await response.json()) as WorldTimelinePayload;
+        if (!cancelled) {
+          setTimelinePayload(payload);
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingTimeline(false);
+        }
+      }
+    }
+
+    void loadTimeline();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session, refreshVersion]);
 
   useEffect(() => {
     if (!selectedEntityId || !session) {
@@ -2093,6 +2135,42 @@ export function App() {
               </div>
             ) : (
               <p className="placeholder">Select an entity to inspect backlinks and source location.</p>
+            )}
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Timeline Workspace</h2>
+              <p>Chronology stays readable even when the world mixes exact dates, ranges, and softer era labels.</p>
+            </header>
+            {timelinePayload ? (
+              <div className="stack">
+                <p className="placeholder">{timelinePayload.summary}</p>
+                {timelinePayload.items.length ? (
+                  <ul className="sources">
+                    {timelinePayload.items.map((item) => (
+                      <li key={item.entityId}>
+                        <div className="section-row">
+                          <strong>{item.title}</strong>
+                          <span className="queue-count">{item.chronologyLabel}</span>
+                        </div>
+                        <span>{typeLabels[item.entityType]} • {item.precision}</span>
+                        <p>{item.summary}</p>
+                        <p className="path-copy">{item.path}</p>
+                        <div className="editor-actions">
+                          <button type="button" onClick={() => setSelectedEntityId(item.entityId)}>
+                            Open Detail
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="placeholder">Add chronology fields like `date`, `start_date`, `end_date`, `era`, or `chronology_label` to surface timeline items here.</p>
+                )}
+              </div>
+            ) : (
+              <p className="placeholder">{isLoadingTimeline ? "Loading timeline workspace..." : "Timeline workspace is unavailable right now."}</p>
             )}
           </article>
 
