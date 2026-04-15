@@ -1,12 +1,15 @@
 import { createServer } from "node:http";
 import type { ServerResponse } from "node:http";
+import { URL } from "node:url";
 
 import { FileSystemVaultReader } from "../retrieval/index.js";
-import type { ActorReactionRequest } from "../contracts/index.js";
+import type { ActorReactionRequest, WorldBrowserEntitySaveRequest } from "../contracts/index.js";
 import { ActorReactionError, createActorReactionResponse, defaultVaultRoot } from "./actor-reaction-service.js";
+import { defaultWorldRoot, loadWorldBrowserPayload, loadWorldEntityDetail, saveWorldEntity } from "./world-browser-service.js";
 
 const port = Number.parseInt(process.env.PORT ?? "4174", 10);
 const vaultRoot = process.env.TRIATHENUM_VAULT_ROOT ?? defaultVaultRoot();
+const worldRoot = defaultWorldRoot();
 const reader = new FileSystemVaultReader(vaultRoot);
 
 function sendJson(response: ServerResponse, status: number, payload: unknown) {
@@ -31,7 +34,71 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && request.url === "/health") {
-    sendJson(response, 200, { ok: true, vaultRoot });
+    sendJson(response, 200, { ok: true, vaultRoot, worldRoot });
+    return;
+  }
+
+  const requestUrl = new URL(request.url, `http://127.0.0.1:${port}`);
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/world/entities") {
+    try {
+      const payload = await loadWorldBrowserPayload(worldRoot, requestUrl.searchParams.get("q") ?? undefined);
+      sendJson(response, 200, payload);
+    } catch (error) {
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to load world browser.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname.startsWith("/api/world/entities/")) {
+    const entityId = decodeURIComponent(requestUrl.pathname.replace("/api/world/entities/", ""));
+
+    try {
+      const payload = await loadWorldEntityDetail(worldRoot, entityId);
+      if (!payload) {
+        sendJson(response, 404, { error: `Entity not found for id ${entityId}` });
+        return;
+      }
+
+      sendJson(response, 200, payload);
+    } catch (error) {
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to load entity detail.",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    (request.method === "POST" && requestUrl.pathname === "/api/world/entities") ||
+    (request.method === "PUT" && requestUrl.pathname.startsWith("/api/world/entities/"))
+  ) {
+    let rawBody = "";
+
+    for await (const chunk of request) {
+      rawBody += chunk;
+    }
+
+    try {
+      const payload = JSON.parse(rawBody) as WorldBrowserEntitySaveRequest;
+      const result = await saveWorldEntity(worldRoot, {
+        ...payload,
+        id:
+          request.method === "PUT"
+            ? decodeURIComponent(requestUrl.pathname.replace("/api/world/entities/", ""))
+            : payload.id,
+      });
+      sendJson(response, request.method === "POST" ? 201 : 200, result);
+    } catch (error) {
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to save entity.",
+      });
+    }
+
     return;
   }
 

@@ -10,3 +10,7 @@ Engineering work accepted by QA.
 6. `STORY-20260411-retrieval-ranking-and-ambiguity.md`
 7. `STORY-20260411-grounding-bundle-enrichment.md`
 8. `STORY-20260411-retrieval-diagnostics.md`
+9. `STORY-20260414-worldforge-phase1-storage-index-and-entity-foundation.md`
+10. `STORY-20260414-worldforge-phase1-responsive-world-browser.md`
+11. `STORY-20260414-worldforge-phase1-markdown-safe-entity-editor.md`
+12. `STORY-20260414-worldforge-phase1-search-backlinks-and-stub-management.md`
