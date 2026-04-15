@@ -3,7 +3,7 @@
 ## Metadata
 - `id`: STORY-20260414-worldforge-phase2-ai-provider-and-context-baseline
 - `owner_role`: Product Manager
-- `status`: ready
+- `status`: active
 - `source`: pm
 - `decision_refs`: [PLAN-2026-04-14-worldforge-roadmap-and-product-phase, ARCH-20260414-worldforge-v1-platform-and-domain-architecture]
 - `success_metric`: WorldForge can configure optional AI backends and inject stable world context into AI workflows without making AI infrastructure mandatory for baseline app operation.
