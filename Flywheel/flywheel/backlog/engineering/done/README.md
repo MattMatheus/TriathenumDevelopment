@@ -24,3 +24,4 @@ Completed engineering stories accepted by QA.
 18. [STORY-20260414-worldforge-phase2-in-editor-prose-assistance](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260414-worldforge-phase2-in-editor-prose-assistance.md)
 19. [STORY-20260414-worldforge-phase2-link-relationship-and-summary-suggestions](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260414-worldforge-phase2-link-relationship-and-summary-suggestions.md)
 20. [STORY-20260415-worldforge-frontmatter-yaml-library-migration](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260415-worldforge-frontmatter-yaml-library-migration.md)
+21. [STORY-20260415-worldforge-auth-and-rbac-hardening-followups](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260415-worldforge-auth-and-rbac-hardening-followups.md)

@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 
 import type {
   AuthAccountProvisionRequest,
@@ -27,6 +27,7 @@ type StoredAccount = AuthAccountSummary & {
 type StoredSession = {
   id: string;
   accountId: string;
+  lookupHash: string;
   tokenHash: string;
   createdAt: string;
   lastSeenAt: string;
@@ -75,6 +76,10 @@ function slugify(value: string): string {
 
 function derivePasswordHash(password: string, salt: string): string {
   return pbkdf2Sync(password, salt, 120_000, 64, "sha512").toString("hex");
+}
+
+function deriveSessionLookupHash(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }
 
 function scrubAccount(account: StoredAccount): AuthAccountSummary {
@@ -209,6 +214,7 @@ export class FileSystemAuthStore {
     state.sessions.push({
       id: `session-${randomBytes(8).toString("hex")}`,
       accountId: account.id,
+      lookupHash: deriveSessionLookupHash(token),
       tokenHash: derivePasswordHash(token, account.passwordSalt),
       createdAt: now.toISOString(),
       lastSeenAt: now.toISOString(),
@@ -234,41 +240,51 @@ export class FileSystemAuthStore {
 
     const state = await this.readState();
     const now = new Date();
-
-    for (const account of state.accounts) {
-      const session = state.sessions.find((candidate) => {
-        if (candidate.accountId !== account.id) {
-          return false;
-        }
-
-        if (new Date(candidate.expiresAt).getTime() <= now.getTime()) {
-          return false;
-        }
-
-        const tokenHash = derivePasswordHash(token, account.passwordSalt);
-        return timingSafeEqual(Buffer.from(tokenHash, "hex"), Buffer.from(candidate.tokenHash, "hex"));
-      });
-
-      if (!session) {
-        continue;
+    const lookupHash = deriveSessionLookupHash(token);
+    const session = state.sessions.find((candidate) => {
+      if (new Date(candidate.expiresAt).getTime() <= now.getTime()) {
+        return false;
       }
 
-      session.lastSeenAt = now.toISOString();
-      session.expiresAt = new Date(now.getTime() + SESSION_TTL_MS).toISOString();
-      await this.writeState(state);
+      if (candidate.lookupHash) {
+        return candidate.lookupHash === lookupHash;
+      }
 
-      const viewer = scrubAccount(account);
-      return {
-        cookie: sessionCookie(token, new Date(session.expiresAt)),
-        payload: {
-          viewer,
-          visibilityOptions: allowedVisibilityOptions(viewer),
-          canManageAccounts: viewer.role === OWNER_ROLE,
-        },
-      };
+      const account = state.accounts.find((item) => item.id === candidate.accountId);
+      if (!account) {
+        return false;
+      }
+
+      const tokenHash = derivePasswordHash(token, account.passwordSalt);
+      return timingSafeEqual(Buffer.from(tokenHash, "hex"), Buffer.from(candidate.tokenHash, "hex"));
+    });
+    if (!session) {
+      return null;
     }
 
-    return null;
+    const account = state.accounts.find((candidate) => candidate.id === session.accountId);
+    if (!account) {
+      return null;
+    }
+
+    const tokenHash = derivePasswordHash(token, account.passwordSalt);
+    if (!timingSafeEqual(Buffer.from(tokenHash, "hex"), Buffer.from(session.tokenHash, "hex"))) {
+      return null;
+    }
+
+    session.lastSeenAt = now.toISOString();
+    session.expiresAt = new Date(now.getTime() + SESSION_TTL_MS).toISOString();
+    await this.writeState(state);
+
+    const viewer = scrubAccount(account);
+    return {
+      cookie: sessionCookie(token, new Date(session.expiresAt)),
+      payload: {
+        viewer,
+        visibilityOptions: allowedVisibilityOptions(viewer),
+        canManageAccounts: viewer.role === OWNER_ROLE,
+      },
+    };
   }
 
   async destroySession(cookieHeader: string | undefined): Promise<string> {
@@ -278,19 +294,24 @@ export class FileSystemAuthStore {
     }
 
     const state = await this.readState();
+    const lookupHash = deriveSessionLookupHash(token);
     let changed = false;
 
     state.sessions = state.sessions.filter((session) => {
-      for (const account of state.accounts) {
-        if (session.accountId !== account.id) {
-          continue;
-        }
+      const account = state.accounts.find((candidate) => candidate.id === session.accountId);
+      if (!account) {
+        changed = true;
+        return false;
+      }
 
-        const tokenHash = derivePasswordHash(token, account.passwordSalt);
-        if (timingSafeEqual(Buffer.from(tokenHash, "hex"), Buffer.from(session.tokenHash, "hex"))) {
-          changed = true;
-          return false;
-        }
+      if (session.lookupHash && session.lookupHash !== lookupHash) {
+        return true;
+      }
+
+      const tokenHash = derivePasswordHash(token, account.passwordSalt);
+      if (timingSafeEqual(Buffer.from(tokenHash, "hex"), Buffer.from(session.tokenHash, "hex"))) {
+        changed = true;
+        return false;
       }
 
       return true;
@@ -309,13 +330,23 @@ export class FileSystemAuthStore {
     try {
       const raw = await readFile(this.authStatePath, "utf8");
       const parsed = JSON.parse(raw) as StoredAuthState;
-      return await this.ensureBootstrap(parsed);
+      return await this.ensureBootstrap(this.migrateState(parsed));
     } catch {
       return this.ensureBootstrap({
         accounts: [],
         sessions: [],
       });
     }
+  }
+
+  private migrateState(state: StoredAuthState): StoredAuthState {
+    return {
+      ...state,
+      sessions: state.sessions.map((session) => ({
+        ...session,
+        lookupHash: session.lookupHash ?? "",
+      })),
+    };
   }
 
   private async ensureBootstrap(state: StoredAuthState): Promise<StoredAuthState> {
