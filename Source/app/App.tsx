@@ -294,6 +294,7 @@ export function App() {
   const [mapNavigation, setMapNavigation] = useState<WorldMapNavigationPayload | null>(null);
   const [isLoadingMapNavigation, setIsLoadingMapNavigation] = useState(false);
   const [selectedMapRegion, setSelectedMapRegion] = useState("all");
+  const [isExportingWorld, setIsExportingWorld] = useState(false);
   const canManageAISettings = session?.viewer.role === "owner";
 
   async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
@@ -1068,6 +1069,33 @@ export function App() {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
       setIsRequestingProse(false);
+    }
+  }
+
+  async function handleExportWorldPackage() {
+    setError(null);
+    setIsExportingWorld(true);
+
+    try {
+      const response = await apiFetch("/api/world/export-package");
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to export the world package.");
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = "worldforge-export.tar";
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsExportingWorld(false);
     }
   }
 
@@ -2400,6 +2428,25 @@ export function App() {
             ) : (
               <p className="placeholder">{isLoadingMapNavigation ? "Loading map navigation..." : "Map navigation is unavailable right now."}</p>
             )}
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>World Export</h2>
+              <p>Portable export stays markdown-first and deterministic so later import work has a trustworthy package shape.</p>
+            </header>
+            <div className="stack">
+              <p className="placeholder">
+                {session?.viewer.role === "owner"
+                  ? "This export includes the full world visible to the owner, including restricted entries."
+                  : "This export includes only the entries visible to your current collaborator role."}
+              </p>
+              <div className="editor-actions">
+                <button type="button" onClick={handleExportWorldPackage} disabled={isExportingWorld}>
+                  {isExportingWorld ? "Exporting..." : "Download Export Package"}
+                </button>
+              </div>
+            </div>
           </article>
 
           <article className="panel">

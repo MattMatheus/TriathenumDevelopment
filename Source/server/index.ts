@@ -25,6 +25,7 @@ import { PathContainmentError, RequestBodyError, readRequestBody, resolveStaticA
 import { generateWorldEntityDraft } from "./draft-generation-service.js";
 import { generateWorldDigest } from "./digest-service.js";
 import { generateEditorSuggestions } from "./editor-suggestion-service.js";
+import { buildWorldExportPackage } from "./export-package-service.js";
 import { loadEntityGraph } from "./graph-service.js";
 import { loadWorldMapNavigation } from "./map-navigation-service.js";
 import { assistEditorProse } from "./prose-assistance-service.js";
@@ -98,6 +99,22 @@ async function sendFile(response: ServerResponse, filePath: string, contentType:
   response.writeHead(200, {
     "content-type": contentType,
     ...(downloadName ? { "content-disposition": `inline; filename="${safeDispositionFilename(downloadName)}"` } : {}),
+  });
+  response.end(contents);
+}
+
+function sendBuffer(
+  response: ServerResponse,
+  status: number,
+  contents: Buffer,
+  contentType: string,
+  downloadName?: string,
+  headers: Record<string, string> = {},
+) {
+  response.writeHead(status, {
+    "content-type": contentType,
+    ...(downloadName ? { "content-disposition": `attachment; filename="${safeDispositionFilename(downloadName)}"` } : {}),
+    ...headers,
   });
   response.end(contents);
 }
@@ -695,6 +712,29 @@ const server = createServer(async (request, response) => {
 
       sendJson(response, 500, {
         error: error instanceof Error ? error.message : "Unable to load the map-linked navigator.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/world/export-package") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const result = await buildWorldExportPackage(worldRoot, viewer);
+      sendBuffer(response, 200, result.contents, result.contentType, result.fileName, authHeaders(session));
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to export the world package.",
       });
     }
 

@@ -3,7 +3,7 @@
 ## Metadata
 - `id`: STORY-20260414-worldforge-phase-3-canon-intelligence-and-navigation
 - `owner_role`: Product Manager
-- `status`: intake
+- `status`: archive
 - `source`: planning
 - `decision_refs`: [PLAN-2026-04-14-worldforge-roadmap-and-product-phase]
 - `success_metric`: PM refines the later-phase canon intelligence and navigation roadmap into bounded stories with explicit prerequisites from the useful core and AI collaboration layers.
@@ -57,4 +57,22 @@ Timeline views, consistency checking, relationship graphs, map pins, and digest 
 
 ## Next Step
 
-PM refinement after Phase 1 and Phase 2 sequencing is stable.
+Archived after PM refinement completed the intended decomposition and disposition pass.
+
+## PM Refinement Outcome
+
+- decomposition complete:
+  - [STORY-20260415-worldforge-phase3-canon-consistency-review.md](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260415-worldforge-phase3-canon-consistency-review.md)
+  - [STORY-20260415-worldforge-phase3-timeline-and-chronology-workspace.md](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260415-worldforge-phase3-timeline-and-chronology-workspace.md)
+  - [STORY-20260415-worldforge-phase3-relationship-graph-explorer.md](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260415-worldforge-phase3-relationship-graph-explorer.md)
+  - [STORY-20260415-worldforge-phase3-world-state-digest-and-review-briefs.md](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260415-worldforge-phase3-world-state-digest-and-review-briefs.md)
+  - [STORY-20260415-worldforge-phase3-map-linked-location-navigation.md](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/done/STORY-20260415-worldforge-phase3-map-linked-location-navigation.md)
+- remaining candidate disposition:
+  - promoted to intake: [STORY-20260415-worldforge-import-and-export-hardening.md](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/intake/STORY-20260415-worldforge-import-and-export-hardening.md)
+  - deferred: richer calendar-system support beyond the accepted chronology workspace
+  - rejected from Phase 3 remainder: publishing-oriented export polish, which stays in Phase 4
+
+## Archive Rationale
+
+- this umbrella item achieved its backlog-shaping purpose and should no longer stay in engineering intake as if broad Phase 3 decomposition were still pending
+- the remaining live work is narrower and now has its own intake artifact
