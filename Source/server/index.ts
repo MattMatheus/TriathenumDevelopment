@@ -26,6 +26,7 @@ import { generateWorldEntityDraft } from "./draft-generation-service.js";
 import { generateWorldDigest } from "./digest-service.js";
 import { generateEditorSuggestions } from "./editor-suggestion-service.js";
 import { loadEntityGraph } from "./graph-service.js";
+import { loadWorldMapNavigation } from "./map-navigation-service.js";
 import { assistEditorProse } from "./prose-assistance-service.js";
 import { reviewWorldConsistency } from "./consistency-review-service.js";
 import { searchWorldSemantically } from "./semantic-search-service.js";
@@ -671,6 +672,29 @@ const server = createServer(async (request, response) => {
 
       sendJson(response, 500, {
         error: error instanceof Error ? error.message : "Unable to generate the world-state digest.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/world/map-navigation") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const result = await loadWorldMapNavigation(worldRoot, viewer);
+      sendJson(response, 200, result, authHeaders(session));
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to load the map-linked navigator.",
       });
     }
 

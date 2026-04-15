@@ -137,6 +137,25 @@ export type WorldDigestPayload = {
   sections: WorldDigestSection[];
 };
 
+export type WorldMapPin = {
+  entityId: string;
+  entityName: string;
+  region: string;
+  x: number;
+  y: number;
+  summary: string;
+};
+
+export type WorldMapNavigationPayload = {
+  scope: "world";
+  summary: string;
+  regions: string[];
+  hasBackdrop: boolean;
+  backdropUrl?: string;
+  backdropLabel?: string;
+  pins: WorldMapPin[];
+};
+
 export type WorldEntityDraftRequest = {
   entityType: WorldEntityType;
   proposedName?: string;

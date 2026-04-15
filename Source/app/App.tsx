@@ -19,6 +19,7 @@ import type {
   WorldEditorSummarySuggestion,
   WorldEntityDraftPayload,
   WorldGraphPayload,
+  WorldMapNavigationPayload,
   WorldSearchMode,
   WorldSemanticSearchPayload,
   WorldTimelinePayload,
@@ -290,6 +291,9 @@ export function App() {
   const [digestScopeMode, setDigestScopeMode] = useState<"world" | "tag">("world");
   const [digestTag, setDigestTag] = useState("");
   const [isLoadingDigest, setIsLoadingDigest] = useState(false);
+  const [mapNavigation, setMapNavigation] = useState<WorldMapNavigationPayload | null>(null);
+  const [isLoadingMapNavigation, setIsLoadingMapNavigation] = useState(false);
+  const [selectedMapRegion, setSelectedMapRegion] = useState("all");
   const canManageAISettings = session?.viewer.role === "owner";
 
   async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
@@ -492,6 +496,48 @@ export function App() {
       cancelled = true;
     };
   }, [selectedEntityId, session, refreshVersion]);
+
+  useEffect(() => {
+    if (!session) {
+      setMapNavigation(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingMapNavigation(true);
+
+    async function loadMapNavigation() {
+      try {
+        const response = await apiFetch("/api/world/map-navigation");
+        if (!response.ok) {
+          const body = (await response.json()) as { error?: string };
+          throw new Error(body.error ?? "Unable to load the map-linked navigator.");
+        }
+
+        const payload = (await response.json()) as WorldMapNavigationPayload;
+        if (!cancelled) {
+          setMapNavigation(payload);
+          setSelectedMapRegion((current) =>
+            current === "all" || payload.regions.includes(current) ? current : payload.regions[0] ?? "all",
+          );
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingMapNavigation(false);
+        }
+      }
+    }
+
+    void loadMapNavigation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session, refreshVersion]);
 
   useEffect(() => {
     if (!session) {
@@ -1274,6 +1320,8 @@ export function App() {
     proseSuggestion && editorState ? previewEditorProseResult(editorState.body, proseSuggestion) : null;
   const detailReferenceSummary =
     detail && typeof detail.fields.reference_summary === "string" ? detail.fields.reference_summary : null;
+  const visibleMapPins =
+    mapNavigation?.pins.filter((pin) => selectedMapRegion === "all" || pin.region === selectedMapRegion) ?? [];
   const visibleConsistencyFindings = consistencyReview?.findings.filter(
     (finding) => consistencyFindingState[finding.id] !== "dismissed",
   ) ?? [];
@@ -2279,6 +2327,78 @@ export function App() {
               <p className="placeholder">
                 {isLoadingGraph ? "Loading graph explorer..." : "Select an entity to inspect its relationship neighborhood."}
               </p>
+            )}
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Map Navigation</h2>
+              <p>Location pins provide a lightweight spatial wayfinding layer without turning the app into a cartography tool.</p>
+            </header>
+            {mapNavigation ? (
+              <div className="stack">
+                <p className="placeholder">{mapNavigation.summary}</p>
+                <div className="editor-row">
+                  <label>
+                    Region
+                    <select value={selectedMapRegion} onChange={(event) => setSelectedMapRegion(event.target.value)}>
+                      <option value="all">All Regions</option>
+                      {mapNavigation.regions.map((region) => (
+                        <option key={region} value={region}>
+                          {region}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <section
+                  className="map-surface"
+                  style={
+                    mapNavigation.hasBackdrop && mapNavigation.backdropUrl
+                      ? { backgroundImage: `linear-gradient(rgba(247,243,232,0.18), rgba(247,243,232,0.18)), url(${mapNavigation.backdropUrl})` }
+                      : undefined
+                  }
+                >
+                  {visibleMapPins.map((pin) => (
+                    <button
+                      key={pin.entityId}
+                      type="button"
+                      className="map-pin"
+                      style={{ left: `${pin.x}%`, top: `${pin.y}%` }}
+                      onClick={() => setSelectedEntityId(pin.entityId)}
+                    >
+                      <span>{pin.entityName}</span>
+                    </button>
+                  ))}
+                  {!visibleMapPins.length ? (
+                    <p className="placeholder map-empty">
+                      {mapNavigation.hasBackdrop
+                        ? "No visible pins are configured for this map scope yet."
+                        : "No map asset or pinned locations are configured yet."}
+                    </p>
+                  ) : null}
+                </section>
+                {visibleMapPins.length ? (
+                  <ul className="sources">
+                    {visibleMapPins.map((pin) => (
+                      <li key={`list-${pin.entityId}`}>
+                        <div className="section-row">
+                          <strong>{pin.entityName}</strong>
+                          <span className="queue-count">{pin.region}</span>
+                        </div>
+                        <p>{pin.summary}</p>
+                        <div className="editor-actions">
+                          <button type="button" onClick={() => setSelectedEntityId(pin.entityId)}>
+                            Open Detail
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : (
+              <p className="placeholder">{isLoadingMapNavigation ? "Loading map navigation..." : "Map navigation is unavailable right now."}</p>
             )}
           </article>
 

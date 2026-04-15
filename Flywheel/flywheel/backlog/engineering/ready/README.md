@@ -18,4 +18,4 @@ No engineering story is currently waiting in Phase 2 ready.
 
 These are sequenced deferred-ready stories created from PM refinement of the canon-intelligence roadmap.
 
-1. [STORY-20260415-worldforge-phase3-map-linked-location-navigation](/Users/foundry/TriathenumDevelopment/Flywheel/flywheel/backlog/engineering/ready/STORY-20260415-worldforge-phase3-map-linked-location-navigation.md)
+No engineering story is currently waiting in Phase 3 ready.

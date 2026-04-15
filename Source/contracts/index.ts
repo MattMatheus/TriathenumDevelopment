@@ -62,6 +62,8 @@ export type {
   WorldDigestRequest,
   WorldDigestScope,
   WorldDigestSection,
+  WorldMapNavigationPayload,
+  WorldMapPin,
   WorldBrowserMediaUploadRequest,
   WorldSearchMode,
   WorldSemanticCitation,
