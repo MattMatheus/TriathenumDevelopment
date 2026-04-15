@@ -10,6 +10,7 @@ import type {
   ActorReactionRequest,
   AuthAccountProvisionRequest,
   AuthLoginRequest,
+  WorldConsistencyReviewRequest,
   WorldEditorSuggestionRequest,
   WorldEditorProseAssistRequest,
   WorldBrowserMediaUploadRequest,
@@ -23,6 +24,7 @@ import { PathContainmentError, RequestBodyError, readRequestBody, resolveStaticA
 import { generateWorldEntityDraft } from "./draft-generation-service.js";
 import { generateEditorSuggestions } from "./editor-suggestion-service.js";
 import { assistEditorProse } from "./prose-assistance-service.js";
+import { reviewWorldConsistency } from "./consistency-review-service.js";
 import { searchWorldSemantically } from "./semantic-search-service.js";
 import {
   attachMediaToEntity,
@@ -550,6 +552,35 @@ const server = createServer(async (request, response) => {
 
       sendJson(response, 500, {
         error: error instanceof Error ? error.message : "Unable to review editor suggestions.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/world/consistency-review") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const rawBody = await readJsonRequestBody(request, MAX_JSON_BODY_BYTES);
+      const payload = JSON.parse(rawBody) as WorldConsistencyReviewRequest;
+      const result = await reviewWorldConsistency(worldRoot, viewer, payload);
+      sendJson(response, 200, result, authHeaders(session));
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to review world consistency.",
       });
     }
 

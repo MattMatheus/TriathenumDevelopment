@@ -41,6 +41,35 @@ export type WorldSemanticSearchPayload = {
   matches: WorldBrowserEntitySummary[];
 };
 
+export type WorldConsistencyReviewRequest = {
+  entityId?: string;
+};
+
+export type WorldConsistencyReviewScope = {
+  mode: "world" | "entity";
+  entityId?: string;
+  entityName?: string;
+};
+
+export type WorldConsistencyFinding = {
+  id: string;
+  findingType: "contradiction" | "missing_corroboration";
+  title: string;
+  summary: string;
+  confidence: "high" | "medium";
+  citations: WorldSemanticCitation[];
+  relatedEntityIds: string[];
+};
+
+export type WorldConsistencyReviewPayload = {
+  status: "ready" | "unavailable";
+  unavailableReason?: string;
+  providerLabel?: string;
+  scope: WorldConsistencyReviewScope;
+  summary: string;
+  findings: WorldConsistencyFinding[];
+};
+
 export type WorldEntityDraftRequest = {
   entityType: WorldEntityType;
   proposedName?: string;

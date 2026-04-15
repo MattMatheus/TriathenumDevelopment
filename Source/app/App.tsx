@@ -8,6 +8,8 @@ import type {
   AuthSessionPayload,
   EntityMediaAsset,
   EntityVisibility,
+  WorldConsistencyFinding,
+  WorldConsistencyReviewPayload,
   WorldEditorLinkSuggestion,
   WorldEditorProseAction,
   WorldEditorProseAssistPayload,
@@ -91,6 +93,10 @@ type ProseSuggestionState = WorldEditorProseAssistPayload & {
 type EditorSuggestionState = WorldEditorSuggestionPayload & {
   status: "ready";
 };
+type ConsistencyReviewState = WorldConsistencyReviewPayload & {
+  status: "ready";
+};
+type ConsistencyFindingState = Record<string, "open" | "deferred" | "dismissed">;
 
 function formatFieldLabel(value: string): string {
   return value
@@ -270,6 +276,9 @@ export function App() {
   const [isRequestingProse, setIsRequestingProse] = useState(false);
   const [editorSuggestions, setEditorSuggestions] = useState<EditorSuggestionState | null>(null);
   const [isLoadingEditorSuggestions, setIsLoadingEditorSuggestions] = useState(false);
+  const [consistencyReview, setConsistencyReview] = useState<ConsistencyReviewState | null>(null);
+  const [consistencyFindingState, setConsistencyFindingState] = useState<ConsistencyFindingState>({});
+  const [isReviewingConsistency, setIsReviewingConsistency] = useState(false);
   const canManageAISettings = session?.viewer.role === "owner";
 
   async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
@@ -302,6 +311,8 @@ export function App() {
               setDraftProvenance(null);
               setProseSuggestion(null);
               setEditorSuggestions(null);
+              setConsistencyReview(null);
+              setConsistencyFindingState({});
               setIsEditing(false);
             });
           }
@@ -608,6 +619,8 @@ export function App() {
     if (!isEditing) {
       setProseSuggestion(null);
       setEditorSuggestions(null);
+      setConsistencyReview(null);
+      setConsistencyFindingState({});
     }
   }, [isEditing, selectedEntityId]);
 
@@ -663,6 +676,8 @@ export function App() {
         setDraftProvenance(null);
         setProseSuggestion(null);
         setEditorSuggestions(null);
+        setConsistencyReview(null);
+        setConsistencyFindingState({});
         setSelectedEntityId(saved.id);
         setIsEditing(false);
       });
@@ -724,6 +739,8 @@ export function App() {
         setDraftProvenance(null);
         setProseSuggestion(null);
         setEditorSuggestions(null);
+        setConsistencyReview(null);
+        setConsistencyFindingState({});
         setSelectedEntityId(null);
         setIsEditing(false);
       });
@@ -851,6 +868,8 @@ export function App() {
         setDraftProvenance(provenance);
         setProseSuggestion(null);
         setEditorSuggestions(null);
+        setConsistencyReview(null);
+        setConsistencyFindingState({});
         setEditorState(buildEditorStateFromDraft(draft, defaultVisibleOption(session)));
       });
     } catch (caughtError) {
@@ -1042,6 +1061,52 @@ export function App() {
     dismissSummarySuggestion();
   }
 
+  async function handleReviewConsistency() {
+    setError(null);
+    setIsReviewingConsistency(true);
+
+    try {
+      const response = await apiFetch("/api/world/consistency-review", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(selectedEntityId ? { entityId: selectedEntityId } : {}),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to review world consistency.");
+      }
+
+      const payload = (await response.json()) as WorldConsistencyReviewPayload;
+      if (payload.status !== "ready") {
+        throw new Error(payload.unavailableReason ?? "Consistency review is unavailable.");
+      }
+
+      setConsistencyReview({
+        ...payload,
+        status: "ready",
+      });
+      setConsistencyFindingState(
+        Object.fromEntries(payload.findings.map((finding) => [finding.id, "open"] as const)),
+      );
+    } catch (caughtError) {
+      setConsistencyReview(null);
+      setConsistencyFindingState({});
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsReviewingConsistency(false);
+    }
+  }
+
+  function updateConsistencyFindingState(finding: WorldConsistencyFinding, state: "open" | "deferred" | "dismissed") {
+    setConsistencyFindingState((current) => ({
+      ...current,
+      [finding.id]: state,
+    }));
+  }
+
   async function handleSaveAISettings(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -1086,6 +1151,12 @@ export function App() {
     proseSuggestion && editorState ? previewEditorProseResult(editorState.body, proseSuggestion) : null;
   const detailReferenceSummary =
     detail && typeof detail.fields.reference_summary === "string" ? detail.fields.reference_summary : null;
+  const visibleConsistencyFindings = consistencyReview?.findings.filter(
+    (finding) => consistencyFindingState[finding.id] !== "dismissed",
+  ) ?? [];
+  const deferredConsistencyCount = visibleConsistencyFindings.filter(
+    (finding) => consistencyFindingState[finding.id] === "deferred",
+  ).length;
 
   if (!session) {
     return (
@@ -2061,6 +2132,88 @@ export function App() {
               )}
             </article>
           ) : null}
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Consistency Review</h2>
+              <p>Run a cited canon check and keep every finding in a human review queue.</p>
+            </header>
+
+            <section className="detail-section">
+              <div className="section-row">
+                <h3>{selectedEntityId ? "Selected Scope" : "Visible Scope"}</h3>
+                <span className="queue-count">
+                  {consistencyReview
+                    ? `${visibleConsistencyFindings.length}${deferredConsistencyCount ? `/${deferredConsistencyCount} deferred` : ""}`
+                    : "idle"}
+                </span>
+              </div>
+              <p className="placeholder">
+                {selectedEntityId
+                  ? "Review the selected entity against visible reciprocal canon and corroboration patterns."
+                  : "Review the visible world for contradictions and missing corroboration with citations."}
+              </p>
+              <div className="editor-actions">
+                <button type="button" onClick={handleReviewConsistency} disabled={isReviewingConsistency}>
+                  {isReviewingConsistency ? "Reviewing..." : selectedEntityId ? "Review Selected Entity" : "Review Visible World"}
+                </button>
+              </div>
+            </section>
+
+            <section className="detail-section">
+              {consistencyReview ? (
+                <div className="stack">
+                  <p className="placeholder">{consistencyReview.summary}</p>
+                  {consistencyReview.providerLabel ? (
+                    <p className="placeholder">Provider baseline: {consistencyReview.providerLabel}</p>
+                  ) : null}
+                  {visibleConsistencyFindings.length ? (
+                    <ul className="sources">
+                      {visibleConsistencyFindings.map((finding) => (
+                        <li key={finding.id}>
+                          <div className="section-row">
+                            <strong>{finding.title}</strong>
+                            <span className="queue-count">
+                              {consistencyFindingState[finding.id] === "deferred"
+                                ? "deferred"
+                                : `${finding.findingType} • ${finding.confidence}`}
+                            </span>
+                          </div>
+                          <p>{finding.summary}</p>
+                          <ul className="sources">
+                            {finding.citations.map((citation) => (
+                              <li key={`${finding.id}-${citation.entityId}`}>
+                                <strong>{citation.entityName}</strong>
+                                <span>{typeLabels[citation.entityType]}</span>
+                                <p>{citation.excerpt}</p>
+                                <p className="path-copy">{citation.path}</p>
+                              </li>
+                            ))}
+                          </ul>
+                          <div className="editor-actions">
+                            <button type="button" onClick={() => updateConsistencyFindingState(finding, "deferred")}>
+                              Defer
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-action"
+                              onClick={() => updateConsistencyFindingState(finding, "dismissed")}
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="placeholder">No open findings are waiting in the current review queue.</p>
+                  )}
+                </div>
+              ) : (
+                <p className="placeholder">Run a review to inspect contradiction and corroboration findings with citations.</p>
+              )}
+            </section>
+          </article>
 
           <article className="panel">
             <header className="panel-header">
