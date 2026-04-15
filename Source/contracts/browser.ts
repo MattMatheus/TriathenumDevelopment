@@ -156,6 +156,38 @@ export type WorldMapNavigationPayload = {
   pins: WorldMapPin[];
 };
 
+export type WorldImportReviewRequest = {
+  fileName: string;
+  base64Data: string;
+};
+
+export type WorldImportReviewIssue = {
+  id: string;
+  kind:
+    | "invalid_package"
+    | "unsupported_entry"
+    | "malformed_document"
+    | "duplicate_entry_path"
+    | "duplicate_entity_id"
+    | "path_conflict"
+    | "media_missing";
+  severity: "error" | "warning";
+  path?: string;
+  entityId?: string;
+  message: string;
+};
+
+export type WorldImportReviewPayload = {
+  status: "ready";
+  summary: string;
+  fileName: string;
+  packageKind: "worldforge-export" | "unknown";
+  validDocumentCount: number;
+  validMediaCount: number;
+  issueCount: number;
+  issues: WorldImportReviewIssue[];
+};
+
 export type WorldEntityDraftRequest = {
   entityType: WorldEntityType;
   proposedName?: string;

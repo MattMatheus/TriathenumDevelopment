@@ -14,6 +14,7 @@ import type {
   WorldDigestRequest,
   WorldEditorSuggestionRequest,
   WorldEditorProseAssistRequest,
+  WorldImportReviewRequest,
   WorldBrowserMediaUploadRequest,
   WorldBrowserEntitySaveRequest,
 } from "../contracts/index.js";
@@ -27,6 +28,7 @@ import { generateWorldDigest } from "./digest-service.js";
 import { generateEditorSuggestions } from "./editor-suggestion-service.js";
 import { buildWorldExportPackage } from "./export-package-service.js";
 import { loadEntityGraph } from "./graph-service.js";
+import { reviewImportPackage } from "./import-review-service.js";
 import { loadWorldMapNavigation } from "./map-navigation-service.js";
 import { assistEditorProse } from "./prose-assistance-service.js";
 import { reviewWorldConsistency } from "./consistency-review-service.js";
@@ -735,6 +737,35 @@ const server = createServer(async (request, response) => {
 
       sendJson(response, 500, {
         error: error instanceof Error ? error.message : "Unable to export the world package.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/world/import-review") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const rawBody = await readJsonRequestBody(request, MAX_MEDIA_BODY_BYTES);
+      const payload = JSON.parse(rawBody) as WorldImportReviewRequest;
+      const result = await reviewImportPackage(worldRoot, viewer, payload);
+      sendJson(response, 200, result, authHeaders(session));
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to review the import package.",
       });
     }
 

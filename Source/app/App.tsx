@@ -19,6 +19,7 @@ import type {
   WorldEditorSummarySuggestion,
   WorldEntityDraftPayload,
   WorldGraphPayload,
+  WorldImportReviewPayload,
   WorldMapNavigationPayload,
   WorldSearchMode,
   WorldSemanticSearchPayload,
@@ -295,6 +296,8 @@ export function App() {
   const [isLoadingMapNavigation, setIsLoadingMapNavigation] = useState(false);
   const [selectedMapRegion, setSelectedMapRegion] = useState("all");
   const [isExportingWorld, setIsExportingWorld] = useState(false);
+  const [importReview, setImportReview] = useState<WorldImportReviewPayload | null>(null);
+  const [isReviewingImport, setIsReviewingImport] = useState(false);
   const canManageAISettings = session?.viewer.role === "owner";
 
   async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
@@ -1096,6 +1099,43 @@ export function App() {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
       setIsExportingWorld(false);
+    }
+  }
+
+  async function handleReviewImportPackage(file: File) {
+    setError(null);
+    setIsReviewingImport(true);
+
+    try {
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error ?? new Error("Unable to read file."));
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.readAsDataURL(file);
+      });
+
+      const response = await apiFetch("/api/world/import-review", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          fileName: file.name,
+          base64Data,
+        }),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to review the import package.");
+      }
+
+      const payload = (await response.json()) as WorldImportReviewPayload;
+      setImportReview(payload);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsReviewingImport(false);
     }
   }
 
@@ -2446,6 +2486,67 @@ export function App() {
                   {isExportingWorld ? "Exporting..." : "Download Export Package"}
                 </button>
               </div>
+            </div>
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Import Review</h2>
+              <p>Dry-run review validates export-shaped packages, surfaces conflicts, and performs no world writes.</p>
+            </header>
+            <div className="stack">
+              <p className="placeholder">
+                {session?.viewer.role === "owner"
+                  ? "Owner uploads stay review-only in this slice: valid items, conflicts, and missing media are surfaced before any future apply path exists."
+                  : "Import review is currently restricted to the owner account."}
+              </p>
+              {session?.viewer.role === "owner" ? (
+                <label className="field">
+                  <span>Package File</span>
+                  <input
+                    type="file"
+                    accept=".tar,application/x-tar"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) {
+                        void handleReviewImportPackage(file);
+                        event.target.value = "";
+                      }
+                    }}
+                  />
+                </label>
+              ) : null}
+              {importReview ? (
+                <div className="stack">
+                  <p className="placeholder">{importReview.summary}</p>
+                  <div className="section-row">
+                    <strong>{importReview.fileName}</strong>
+                    <span className="queue-count">{importReview.packageKind}</span>
+                  </div>
+                  <p className="placeholder">
+                    Valid documents: {importReview.validDocumentCount} • Valid media: {importReview.validMediaCount} • Issues: {importReview.issueCount}
+                  </p>
+                  {importReview.issues.length ? (
+                    <ul className="sources">
+                      {importReview.issues.map((entry) => (
+                        <li key={entry.id}>
+                          <div className="section-row">
+                            <strong>{entry.kind.replace(/_/g, " ")}</strong>
+                            <span className="queue-count">{entry.severity}</span>
+                          </div>
+                          <p>{entry.message}</p>
+                          {entry.path ? <p className="path-copy">{entry.path}</p> : null}
+                          {entry.entityId ? <p className="path-copy">{entry.entityId}</p> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="placeholder">No issues detected in the reviewed package.</p>
+                  )}
+                </div>
+              ) : (
+                <p className="placeholder">{isReviewingImport ? "Reviewing import package..." : "Upload an export-shaped package to inspect it without writing world files."}</p>
+              )}
             </div>
           </article>
 
