@@ -35,7 +35,6 @@ import {
   applySummarySuggestion,
   buildEditorSuggestionRequest,
 } from "./editor-suggestions.js";
-import { nextStoredSessionToken, SESSION_STORAGE_KEY, shouldAttemptWorldLoad } from "./session.js";
 
 const typeLabels: Record<WorldEntityType, string> = {
   character: "Characters",
@@ -225,19 +224,6 @@ function buildAISettingsFormState(settings: AISettingsPayload | null): AISetting
   };
 }
 
-function readStoredSessionToken(): string | null {
-  return window.localStorage.getItem(SESSION_STORAGE_KEY);
-}
-
-function writeStoredSessionToken(token: string | null) {
-  if (!token) {
-    window.localStorage.removeItem(SESSION_STORAGE_KEY);
-    return;
-  }
-
-  window.localStorage.setItem(SESSION_STORAGE_KEY, token);
-}
-
 export function App() {
   const typeFilterId = useId();
   const tagFilterId = useId();
@@ -261,8 +247,8 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMode, setSearchMode] = useState<WorldSearchMode>("keyword");
   const [refreshVersion, setRefreshVersion] = useState(0);
-  const [loginEmail, setLoginEmail] = useState("owner@worldforge.local");
-  const [loginPassword, setLoginPassword] = useState("worldforge-owner");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [provisionEmail, setProvisionEmail] = useState("");
   const [provisionName, setProvisionName] = useState("");
@@ -284,34 +270,16 @@ export function App() {
   const [isRequestingProse, setIsRequestingProse] = useState(false);
   const [editorSuggestions, setEditorSuggestions] = useState<EditorSuggestionState | null>(null);
   const [isLoadingEditorSuggestions, setIsLoadingEditorSuggestions] = useState(false);
+  const canManageAISettings = session?.viewer.role === "owner";
 
   async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
-    const headers = new Headers(init.headers);
-    const token = readStoredSessionToken();
-    if (token) {
-      headers.set("x-worldforge-session", token);
-    }
-
-    const response = await fetch(input, {
-      ...init,
-      headers,
-    });
-    writeStoredSessionToken(
-      nextStoredSessionToken(readStoredSessionToken(), response.status, response.headers.get("x-worldforge-session")),
-    );
-
-    return response;
+    return fetch(input, init);
   }
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadWorld() {
-      if (!shouldAttemptWorldLoad(readStoredSessionToken(), Boolean(session))) {
-        setIsLoadingWorld(false);
-        return;
-      }
-
       setIsLoadingWorld(true);
       setError(null);
 
@@ -324,7 +292,6 @@ export function App() {
         const response = await apiFetch(`/api/world/entities${params.size ? `?${params.toString()}` : ""}`);
         if (response.status === 401) {
           if (!cancelled) {
-            writeStoredSessionToken(null);
             startTransition(() => {
               setSession(null);
               setPayload(null);
@@ -364,7 +331,6 @@ export function App() {
         });
       } catch (caughtError) {
         if (!cancelled) {
-          writeStoredSessionToken(null);
           setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
         }
       } finally {
@@ -565,7 +531,6 @@ export function App() {
         const response = await apiFetch(`/api/world/entities/${encodeURIComponent(entityId)}`);
         if (response.status === 401) {
           if (!cancelled) {
-            writeStoredSessionToken(null);
             setSession(null);
             setPayload(null);
             setSelectedEntityId(null);
@@ -750,7 +715,6 @@ export function App() {
         method: "DELETE",
       });
     } finally {
-      writeStoredSessionToken(null);
       startTransition(() => {
         setSession(null);
         setPayload(null);
@@ -799,16 +763,6 @@ export function App() {
     } finally {
       setIsProvisioning(false);
     }
-  }
-
-  function mediaUrl(url: string): string {
-    const token = readStoredSessionToken();
-    if (!token) {
-      return url;
-    }
-
-    const separator = url.includes("?") ? "&" : "?";
-    return `${url}${separator}sessionToken=${encodeURIComponent(token)}`;
   }
 
   async function handleUploadMedia(file: File) {
@@ -1182,8 +1136,8 @@ export function App() {
             </header>
             <div className="stack">
               <p className="placeholder">
-                Default local credentials are <strong>owner@worldforge.local</strong> and <strong>worldforge-owner</strong>
-                until self-hosted values override them.
+                Configure the owner bootstrap values through environment variables before exposing WorldForge beyond
+                local-only development.
               </p>
               <p className="placeholder">
                 After signing in as the owner, provision collaborator accounts directly from the browser. No self-service
@@ -1961,11 +1915,11 @@ export function App() {
                         {detail.media.map((asset) => (
                           <article key={asset.id} className="media-card">
                             {asset.kind === "image" ? (
-                              <img src={mediaUrl(asset.url)} alt={asset.alt ?? asset.originalFileName} className="media-preview" />
+                              <img src={asset.url} alt={asset.alt ?? asset.originalFileName} className="media-preview" />
                             ) : null}
                             <strong>{asset.originalFileName}</strong>
                             <p>{asset.caption ?? asset.alt ?? asset.contentType}</p>
-                            <a href={mediaUrl(asset.url)} target="_blank" rel="noreferrer">
+                            <a href={asset.url} target="_blank" rel="noreferrer">
                               Open media
                             </a>
                           </article>
@@ -2131,110 +2085,113 @@ export function App() {
             </section>
 
             <form className="stack" onSubmit={handleSaveAISettings}>
-              <label className="field">
-                <span>Provider Kind</span>
-                <select
-                  value={aiFormState.kind}
-                  onChange={(event) =>
-                    setAIFormState((current) => ({
-                      ...current,
-                      kind: event.target.value as AIProviderKind,
-                    }))
-                  }
-                >
-                  {(aiSettings?.availableProviderKinds ?? ["disabled", "hosted", "local", "mcp"]).map((kind) => (
-                    <option key={kind} value={kind}>
-                      {formatFieldLabel(kind)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <fieldset className="stack" disabled={!canManageAISettings || isSavingAISettings}>
+                <label className="field">
+                  <span>Provider Kind</span>
+                  <select
+                    value={aiFormState.kind}
+                    onChange={(event) =>
+                      setAIFormState((current) => ({
+                        ...current,
+                        kind: event.target.value as AIProviderKind,
+                      }))
+                    }
+                  >
+                    {(aiSettings?.availableProviderKinds ?? ["disabled", "hosted", "local", "mcp"]).map((kind) => (
+                      <option key={kind} value={kind}>
+                        {formatFieldLabel(kind)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-              {aiFormState.kind !== "disabled" ? (
-                <>
-                  <label className="field">
-                    <span>Provider Label</span>
-                    <input
-                      value={aiFormState.label}
-                      onChange={(event) =>
-                        setAIFormState((current) => ({
-                          ...current,
-                          label: event.target.value,
-                        }))
-                      }
-                      placeholder="Optional display name"
-                    />
-                  </label>
-
-                  {aiFormState.kind === "hosted" || aiFormState.kind === "local" ? (
+                {aiFormState.kind !== "disabled" ? (
+                  <>
                     <label className="field">
-                      <span>Endpoint</span>
+                      <span>Provider Label</span>
                       <input
-                        value={aiFormState.endpoint}
+                        value={aiFormState.label}
                         onChange={(event) =>
                           setAIFormState((current) => ({
                             ...current,
-                            endpoint: event.target.value,
+                            label: event.target.value,
                           }))
                         }
-                        placeholder="http://localhost:11434/v1 or provider URL"
+                        placeholder="Optional display name"
                       />
                     </label>
-                  ) : null}
 
-                  {aiFormState.kind === "mcp" ? (
+                    {aiFormState.kind === "hosted" || aiFormState.kind === "local" ? (
+                      <label className="field">
+                        <span>Endpoint</span>
+                        <input
+                          value={aiFormState.endpoint}
+                          onChange={(event) =>
+                            setAIFormState((current) => ({
+                              ...current,
+                              endpoint: event.target.value,
+                            }))
+                          }
+                          placeholder="http://localhost:11434/v1 or provider URL"
+                        />
+                      </label>
+                    ) : null}
+
+                    {aiFormState.kind === "mcp" ? (
+                      <label className="field">
+                        <span>MCP Server Name</span>
+                        <input
+                          value={aiFormState.mcpServerName}
+                          onChange={(event) =>
+                            setAIFormState((current) => ({
+                              ...current,
+                              mcpServerName: event.target.value,
+                            }))
+                          }
+                          placeholder="worldforge-assistant"
+                        />
+                      </label>
+                    ) : null}
+
                     <label className="field">
-                      <span>MCP Server Name</span>
+                      <span>Model</span>
                       <input
-                        value={aiFormState.mcpServerName}
+                        value={aiFormState.model}
                         onChange={(event) =>
                           setAIFormState((current) => ({
                             ...current,
-                            mcpServerName: event.target.value,
+                            model: event.target.value,
                           }))
                         }
-                        placeholder="worldforge-assistant"
+                        placeholder="gpt-5-mini, llama3, or similar"
                       />
                     </label>
-                  ) : null}
 
-                  <label className="field">
-                    <span>Model</span>
-                    <input
-                      value={aiFormState.model}
-                      onChange={(event) =>
-                        setAIFormState((current) => ({
-                          ...current,
-                          model: event.target.value,
-                        }))
-                      }
-                      placeholder="gpt-5-mini, llama3, or similar"
-                    />
-                  </label>
+                    {aiFormState.kind === "hosted" ? (
+                      <label className="field">
+                        <span>API Key</span>
+                        <input
+                          type="password"
+                          value={aiFormState.apiKey}
+                          onChange={(event) =>
+                            setAIFormState((current) => ({
+                              ...current,
+                              apiKey: event.target.value,
+                            }))
+                          }
+                          placeholder={aiSettings?.provider.apiKeyConfigured ? "Stored key will be kept if left blank" : "Paste API key"}
+                        />
+                      </label>
+                    ) : null}
+                  </>
+                ) : null}
 
-                  {aiFormState.kind === "hosted" ? (
-                    <label className="field">
-                      <span>API Key</span>
-                      <input
-                        type="password"
-                        value={aiFormState.apiKey}
-                        onChange={(event) =>
-                          setAIFormState((current) => ({
-                            ...current,
-                            apiKey: event.target.value,
-                          }))
-                        }
-                        placeholder={aiSettings?.provider.apiKeyConfigured ? "Stored key will be kept if left blank" : "Paste API key"}
-                      />
-                    </label>
-                  ) : null}
-                </>
-              ) : null}
-
-              <button type="submit" disabled={isSavingAISettings}>
-                {isSavingAISettings ? "Saving AI Baseline..." : "Save AI Baseline"}
-              </button>
+                <button type="submit" disabled={!canManageAISettings || isSavingAISettings}>
+                  {isSavingAISettings ? "Saving AI Baseline..." : "Save AI Baseline"}
+                </button>
+              </fieldset>
             </form>
+            {!canManageAISettings ? <p className="placeholder">Only the owner can change AI baseline settings.</p> : null}
 
             <section className="detail-section">
               <div className="section-row">

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -43,7 +43,7 @@ describe("FileSystemAISettingsStore", () => {
     expect(payload.provider.status.reason).toMatch(/disabled/i);
   });
 
-  it("persists a hosted provider baseline and preserves the secret as configured metadata", async () => {
+  it("persists a hosted provider baseline without keeping the API key in plaintext", async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), "worldforge-ai-"));
     tempDirs.push(tempRoot);
 
@@ -63,6 +63,10 @@ describe("FileSystemAISettingsStore", () => {
     const reload = await store.load();
     expect(reload.provider.apiKeyConfigured).toBe(true);
     expect(reload.provider.status.available).toBe(true);
+
+    const persisted = await readFile(path.join(tempRoot, ".worldforge", "ai-settings.json"), "utf8");
+    expect(persisted).not.toContain("secret-123");
+    expect(persisted).toContain("apiKeyCiphertext");
   });
 
   it("rejects incomplete provider configurations", async () => {

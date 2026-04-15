@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import path from "node:path";
 
 import type {
@@ -18,6 +19,11 @@ type StoredAISettings = {
   endpoint?: string;
   model?: string;
   mcpServerName?: string;
+  apiKey?: string;
+  apiKeyCiphertext?: string;
+};
+
+type PersistedAISettings = Omit<StoredAISettings, "apiKey"> & {
   apiKey?: string;
 };
 
@@ -174,10 +180,12 @@ export class AISettingsError extends Error {
 export class FileSystemAISettingsStore {
   private readonly settingsRoot: string;
   private readonly settingsPath: string;
+  private readonly settingsKeyPath: string;
 
   constructor(worldRoot: string) {
     this.settingsRoot = process.env.TRIATHENUM_AI_SETTINGS_ROOT ?? path.join(worldRoot, ".worldforge");
     this.settingsPath = path.join(this.settingsRoot, "ai-settings.json");
+    this.settingsKeyPath = path.join(this.settingsRoot, "ai-settings.key");
   }
 
   async load(): Promise<AISettingsPayload> {
@@ -238,7 +246,18 @@ export class FileSystemAISettingsStore {
 
     try {
       const raw = await readFile(this.settingsPath, "utf8");
-      return sanitizeStoredSettings(JSON.parse(raw) as StoredAISettings);
+      const parsed = JSON.parse(raw) as PersistedAISettings;
+      const apiKey =
+        typeof parsed.apiKeyCiphertext === "string"
+          ? await this.decryptSecret(parsed.apiKeyCiphertext)
+          : typeof parsed.apiKey === "string"
+            ? parsed.apiKey
+            : undefined;
+
+      return sanitizeStoredSettings({
+        ...parsed,
+        apiKey,
+      });
     } catch {
       return { kind: "disabled" };
     }
@@ -246,7 +265,72 @@ export class FileSystemAISettingsStore {
 
   private async writeState(state: StoredAISettings): Promise<void> {
     await mkdir(this.settingsRoot, { recursive: true });
-    await writeFile(this.settingsPath, JSON.stringify(state, null, 2), "utf8");
+    const persisted: PersistedAISettings = state.apiKey
+      ? {
+          ...state,
+          apiKey: undefined,
+          apiKeyCiphertext: await this.encryptSecret(state.apiKey),
+        }
+      : {
+          ...state,
+          apiKey: undefined,
+          apiKeyCiphertext: undefined,
+        };
+
+    await writeFile(this.settingsPath, JSON.stringify(persisted, null, 2), "utf8");
+  }
+
+  private async encryptionKey(): Promise<Buffer> {
+    const envSecret = process.env.TRIATHENUM_AI_SETTINGS_SECRET?.trim();
+    if (envSecret) {
+      return createHash("sha256").update(envSecret).digest();
+    }
+
+    await mkdir(this.settingsRoot, { recursive: true });
+
+    try {
+      const stored = await readFile(this.settingsKeyPath, "utf8");
+      return Buffer.from(stored.trim(), "base64");
+    } catch {
+      const generated = randomBytes(32);
+      await writeFile(this.settingsKeyPath, generated.toString("base64"), { encoding: "utf8", mode: 0o600 });
+      return generated;
+    }
+  }
+
+  private async encryptSecret(secret: string): Promise<string> {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", await this.encryptionKey(), iv);
+    const ciphertext = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
+    const tag = cipher.getAuthTag();
+
+    return JSON.stringify({
+      version: 1,
+      iv: iv.toString("base64"),
+      tag: tag.toString("base64"),
+      ciphertext: ciphertext.toString("base64"),
+    });
+  }
+
+  private async decryptSecret(encodedSecret: string): Promise<string> {
+    const parsed = JSON.parse(encodedSecret) as {
+      version: number;
+      iv: string;
+      tag: string;
+      ciphertext: string;
+    };
+
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      await this.encryptionKey(),
+      Buffer.from(parsed.iv, "base64"),
+    );
+    decipher.setAuthTag(Buffer.from(parsed.tag, "base64"));
+
+    return Buffer.concat([
+      decipher.update(Buffer.from(parsed.ciphertext, "base64")),
+      decipher.final(),
+    ]).toString("utf8");
   }
 }
 

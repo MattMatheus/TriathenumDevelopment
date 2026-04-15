@@ -4,7 +4,7 @@ import os from "node:os";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { FileSystemAuthStore, type AuthenticatedViewer, parseSessionToken } from "./auth-service.js";
+import { assertSafeOwnerBootstrap, FileSystemAuthStore, type AuthenticatedViewer, parseSessionToken } from "./auth-service.js";
 
 const tempDirs: string[] = [];
 const originalAuthRoot = process.env.TRIATHENUM_AUTH_ROOT;
@@ -91,5 +91,21 @@ describe("FileSystemAuthStore", () => {
     expect(account.role).toBe("collaborator");
     const accounts = await store.listAccounts(owner);
     expect(accounts.map((item) => item.email)).toEqual(["owner@example.com", "writer@example.com"]);
+  });
+});
+
+describe("assertSafeOwnerBootstrap", () => {
+  it("allows default bootstrap credentials on localhost", () => {
+    delete process.env.WORLDFORGE_OWNER_EMAIL;
+    delete process.env.WORLDFORGE_OWNER_PASSWORD;
+
+    expect(() => assertSafeOwnerBootstrap("127.0.0.1")).not.toThrow();
+  });
+
+  it("rejects default bootstrap credentials on non-local hosts", () => {
+    delete process.env.WORLDFORGE_OWNER_EMAIL;
+    delete process.env.WORLDFORGE_OWNER_PASSWORD;
+
+    expect(() => assertSafeOwnerBootstrap("0.0.0.0")).toThrow(/configure worldforge_owner_email/i);
   });
 });

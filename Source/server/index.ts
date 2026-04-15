@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import type { ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { URL } from "node:url";
@@ -18,7 +18,8 @@ import type {
 import { AISettingsError, FileSystemAISettingsStore, loadAIWorldContext } from "./ai-service.js";
 import { ActorReactionError, createActorReactionResponse, defaultVaultRoot } from "./actor-reaction-service.js";
 import type { WorldEntityDraftRequest } from "../contracts/index.js";
-import { AuthError, FileSystemAuthStore } from "./auth-service.js";
+import { assertSafeOwnerBootstrap, AuthError, FileSystemAuthStore } from "./auth-service.js";
+import { PathContainmentError, RequestBodyError, readRequestBody, resolveStaticAssetPath } from "./http-utils.js";
 import { generateWorldEntityDraft } from "./draft-generation-service.js";
 import { generateEditorSuggestions } from "./editor-suggestion-service.js";
 import { assistEditorProse } from "./prose-assistance-service.js";
@@ -39,8 +40,11 @@ const worldRoot = defaultWorldRoot();
 const reader = new FileSystemVaultReader(vaultRoot);
 const authStore = new FileSystemAuthStore(worldRoot);
 const aiSettingsStore = new FileSystemAISettingsStore(worldRoot);
-const SESSION_HEADER = "x-worldforge-session";
 const distRoot = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "dist");
+const MAX_JSON_BODY_BYTES = 5 * 1024 * 1024;
+const MAX_MEDIA_BODY_BYTES = 12 * 1024 * 1024;
+
+assertSafeOwnerBootstrap(host);
 
 function contentTypeFor(filePath: string): string {
   const extension = path.extname(filePath).toLowerCase();
@@ -91,6 +95,14 @@ async function sendFile(response: ServerResponse, filePath: string, contentType:
   response.end(contents);
 }
 
+function authHeaders(session: { cookie: string } | null): Record<string, string> {
+  return session ? { "set-cookie": session.cookie } : {};
+}
+
+async function readJsonRequestBody(request: IncomingMessage, maxBytes: number): Promise<string> {
+  return readRequestBody(request, maxBytes);
+}
+
 const server = createServer(async (request, response) => {
   if (!request.url) {
     sendJson(response, 400, { error: "Missing request URL." });
@@ -108,11 +120,7 @@ const server = createServer(async (request, response) => {
   }
 
   const requestUrl = new URL(request.url, `http://127.0.0.1:${port}`);
-  const headerSessionToken = Array.isArray(request.headers[SESSION_HEADER])
-    ? request.headers[SESSION_HEADER][0]
-    : request.headers[SESSION_HEADER];
-  const querySessionToken = requestUrl.searchParams.get("sessionToken");
-  const session = await authStore.resolveSession(request.headers.cookie, headerSessionToken ?? querySessionToken);
+  const session = await authStore.resolveSession(request.headers.cookie);
   const viewer = session?.payload.viewer ?? null;
 
   if (request.method === "GET" && requestUrl.pathname === "/api/auth/session") {
@@ -121,28 +129,21 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    sendJson(response, 200, session.payload, {
-      "set-cookie": session.cookie,
-      [SESSION_HEADER]: session.token,
-    });
+    sendJson(response, 200, session.payload, authHeaders(session));
     return;
   }
 
   if (request.method === "POST" && requestUrl.pathname === "/api/auth/session") {
-    let rawBody = "";
-
-    for await (const chunk of request) {
-      rawBody += chunk;
-    }
-
     try {
+      const rawBody = await readJsonRequestBody(request, MAX_JSON_BODY_BYTES);
       const payload = JSON.parse(rawBody) as AuthLoginRequest;
       const result = await authStore.createSession(payload);
-      sendJson(response, 200, result.payload, {
-        "set-cookie": result.cookie,
-        [SESSION_HEADER]: result.token,
-      });
+      sendJson(response, 200, result.payload, { "set-cookie": result.cookie });
     } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
       if (error instanceof AuthError) {
         sendJson(response, error.status, { error: error.message });
         return;
@@ -170,7 +171,7 @@ const server = createServer(async (request, response) => {
 
     try {
       const accounts = await authStore.listAccounts(viewer);
-      sendJson(response, 200, { accounts }, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+      sendJson(response, 200, { accounts }, authHeaders(session));
     } catch (error) {
       if (error instanceof AuthError) {
         sendJson(response, error.status, { error: error.message });
@@ -191,7 +192,7 @@ const server = createServer(async (request, response) => {
 
     try {
       const payload = await aiSettingsStore.load();
-      sendJson(response, 200, payload, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+      sendJson(response, 200, payload, authHeaders(session));
     } catch (error) {
       sendJson(response, 500, { error: error instanceof Error ? error.message : "Unable to load AI settings." });
     }
@@ -205,17 +206,21 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    let rawBody = "";
-
-    for await (const chunk of request) {
-      rawBody += chunk;
+    if (viewer.role !== "owner") {
+      sendJson(response, 403, { error: "Only the owner can update AI settings." }, authHeaders(session));
+      return;
     }
 
     try {
+      const rawBody = await readJsonRequestBody(request, MAX_JSON_BODY_BYTES);
       const payload = JSON.parse(rawBody) as AISettingsUpdateRequest;
       const result = await aiSettingsStore.save(payload);
-      sendJson(response, 200, result, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+      sendJson(response, 200, result, authHeaders(session));
     } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
       if (error instanceof AISettingsError) {
         sendJson(response, error.status, { error: error.message });
         return;
@@ -235,7 +240,7 @@ const server = createServer(async (request, response) => {
 
     try {
       const payload = await loadAIWorldContext(worldRoot, viewer, requestUrl.searchParams.get("entityId") ?? undefined);
-      sendJson(response, 200, payload, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+      sendJson(response, 200, payload, authHeaders(session));
     } catch (error) {
       if (error instanceof AuthError) {
         sendJson(response, error.status, { error: error.message });
@@ -254,17 +259,16 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    let rawBody = "";
-
-    for await (const chunk of request) {
-      rawBody += chunk;
-    }
-
     try {
+      const rawBody = await readJsonRequestBody(request, MAX_JSON_BODY_BYTES);
       const payload = JSON.parse(rawBody) as AuthAccountProvisionRequest;
       const account = await authStore.createOwnerManagedAccount(viewer, payload);
-      sendJson(response, 201, account, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+      sendJson(response, 201, account, authHeaders(session));
     } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
       if (error instanceof AuthError) {
         sendJson(response, error.status, { error: error.message });
         return;
@@ -286,7 +290,7 @@ const server = createServer(async (request, response) => {
 
     try {
       const payload = await loadWorldBrowserPayload(worldRoot, viewer, requestUrl.searchParams.get("q") ?? undefined);
-      sendJson(response, 200, payload, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+      sendJson(response, 200, payload, authHeaders(session));
     } catch (error) {
       if (error instanceof AuthError) {
         sendJson(response, error.status, { error: error.message });
@@ -309,7 +313,7 @@ const server = createServer(async (request, response) => {
 
     try {
       const payload = await searchWorldSemantically(worldRoot, viewer, requestUrl.searchParams.get("q") ?? "");
-      sendJson(response, 200, payload, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+      sendJson(response, 200, payload, authHeaders(session));
     } catch (error) {
       if (error instanceof AuthError) {
         sendJson(response, error.status, { error: error.message });
@@ -335,17 +339,16 @@ const server = createServer(async (request, response) => {
     }
 
     const entityId = decodeURIComponent(requestUrl.pathname.replace("/api/world/entities/", "").replace("/media", ""));
-    let rawBody = "";
-
-    for await (const chunk of request) {
-      rawBody += chunk;
-    }
-
     try {
+      const rawBody = await readJsonRequestBody(request, MAX_MEDIA_BODY_BYTES);
       const payload = JSON.parse(rawBody) as WorldBrowserMediaUploadRequest;
       const result = await attachMediaToEntity(worldRoot, viewer, entityId, payload);
-      sendJson(response, 201, result, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+      sendJson(response, 201, result, authHeaders(session));
     } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
       if (error instanceof AuthError) {
         sendJson(response, error.status, { error: error.message });
         return;
@@ -386,6 +389,10 @@ const server = createServer(async (request, response) => {
 
       await sendFile(response, media.absolutePath, media.contentType, media.originalFileName);
     } catch (error) {
+      if (error instanceof PathContainmentError) {
+        sendJson(response, 400, { error: error.message }, authHeaders(session));
+        return;
+      }
       sendJson(response, 500, {
         error: error instanceof Error ? error.message : "Unable to load media.",
       });
@@ -409,7 +416,7 @@ const server = createServer(async (request, response) => {
         return;
       }
 
-      sendJson(response, 200, payload, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+      sendJson(response, 200, payload, authHeaders(session));
     } catch (error) {
       if (error instanceof AuthError) {
         sendJson(response, error.status, { error: error.message });
@@ -433,13 +440,8 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    let rawBody = "";
-
-    for await (const chunk of request) {
-      rawBody += chunk;
-    }
-
     try {
+      const rawBody = await readJsonRequestBody(request, MAX_JSON_BODY_BYTES);
       const payload = JSON.parse(rawBody) as WorldBrowserEntitySaveRequest;
       const result = await saveWorldEntity(worldRoot, viewer, {
         ...payload,
@@ -448,8 +450,12 @@ const server = createServer(async (request, response) => {
             ? decodeURIComponent(requestUrl.pathname.replace("/api/world/entities/", ""))
             : payload.id,
       });
-      sendJson(response, request.method === "POST" ? 201 : 200, result, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+      sendJson(response, request.method === "POST" ? 201 : 200, result, authHeaders(session));
     } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
       if (error instanceof AuthError) {
         sendJson(response, error.status, { error: error.message });
         return;
@@ -469,17 +475,16 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    let rawBody = "";
-
-    for await (const chunk of request) {
-      rawBody += chunk;
-    }
-
     try {
+      const rawBody = await readJsonRequestBody(request, MAX_JSON_BODY_BYTES);
       const payload = JSON.parse(rawBody) as WorldEntityDraftRequest;
       const result = await generateWorldEntityDraft(worldRoot, viewer, payload);
-      sendJson(response, 200, result, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+      sendJson(response, 200, result, authHeaders(session));
     } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
       if (error instanceof AuthError) {
         sendJson(response, error.status, { error: error.message });
         return;
@@ -499,17 +504,16 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    let rawBody = "";
-
-    for await (const chunk of request) {
-      rawBody += chunk;
-    }
-
     try {
+      const rawBody = await readJsonRequestBody(request, MAX_JSON_BODY_BYTES);
       const payload = JSON.parse(rawBody) as WorldEditorProseAssistRequest;
       const result = await assistEditorProse(worldRoot, viewer, payload);
-      sendJson(response, 200, result, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+      sendJson(response, 200, result, authHeaders(session));
     } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
       if (error instanceof AuthError) {
         sendJson(response, error.status, { error: error.message });
         return;
@@ -529,17 +533,16 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    let rawBody = "";
-
-    for await (const chunk of request) {
-      rawBody += chunk;
-    }
-
     try {
+      const rawBody = await readJsonRequestBody(request, MAX_JSON_BODY_BYTES);
       const payload = JSON.parse(rawBody) as WorldEditorSuggestionRequest;
       const result = await generateEditorSuggestions(worldRoot, viewer, payload);
-      sendJson(response, 200, result, session ? { "set-cookie": session.cookie, [SESSION_HEADER]: session.token } : {});
+      sendJson(response, 200, result, authHeaders(session));
     } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
       if (error instanceof AuthError) {
         sendJson(response, error.status, { error: error.message });
         return;
@@ -554,17 +557,16 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && request.url === "/api/actor-reaction") {
-    let rawBody = "";
-
-    for await (const chunk of request) {
-      rawBody += chunk;
-    }
-
     try {
+      const rawBody = await readJsonRequestBody(request, MAX_JSON_BODY_BYTES);
       const payload = JSON.parse(rawBody) as ActorReactionRequest;
       const result = await createActorReactionResponse(reader, payload);
       sendJson(response, 200, result);
     } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
       if (error instanceof ActorReactionError) {
         sendJson(response, error.status, {
           error: error.message,
@@ -582,16 +584,16 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && !requestUrl.pathname.startsWith("/api")) {
-    const requestedPath =
-      requestUrl.pathname === "/"
-        ? path.join(distRoot, "index.html")
-        : path.join(distRoot, requestUrl.pathname.replace(/^\/+/, ""));
-
     try {
+      const requestedPath = resolveStaticAssetPath(distRoot, requestUrl.pathname);
       const target = await stat(requestedPath).then((entry) => (entry.isFile() ? requestedPath : path.join(distRoot, "index.html")));
       await sendFile(response, target, contentTypeFor(target));
       return;
-    } catch {
+    } catch (error) {
+      if (error instanceof PathContainmentError) {
+        sendText(response, 404, "Not found.");
+        return;
+      }
       const fallbackPath = path.join(distRoot, "index.html");
       try {
         await sendFile(response, fallbackPath, contentTypeFor(fallbackPath));
