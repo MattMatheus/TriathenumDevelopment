@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 import type { EntityDocument, WorldEntityType } from "../contracts/index.js";
+import { PathContainmentError } from "../server/http-utils.js";
 import { parseEntityDocument, serializeEntityDocument, updateEntityDocumentPath } from "./document.js";
 import type { WorldDocumentStore } from "./types.js";
 
@@ -24,6 +25,17 @@ async function walk(dir: string): Promise<string[]> {
   }
 
   return results.sort((left, right) => left.localeCompare(right));
+}
+
+function resolvePathInsideWorld(worldRoot: string, relativePath: string): string {
+  const resolvedRoot = path.resolve(worldRoot);
+  const resolvedPath = path.resolve(resolvedRoot, relativePath);
+
+  if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(`${resolvedRoot}${path.sep}`)) {
+    throw new PathContainmentError("Media path escapes the world root.");
+  }
+
+  return resolvedPath;
 }
 
 export class FileSystemWorldDocumentStore implements WorldDocumentStore {
@@ -67,7 +79,7 @@ export class FileSystemWorldDocumentStore implements WorldDocumentStore {
   }
 
   resolveMediaPath(relativeMediaPath: string): string {
-    return path.join(this.worldRoot, relativeMediaPath);
+    return resolvePathInsideWorld(this.worldRoot, relativeMediaPath);
   }
 
   buildMediaPath(entityId: string, originalFileName: string): string {

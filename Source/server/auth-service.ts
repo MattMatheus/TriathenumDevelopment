@@ -16,6 +16,8 @@ const SESSION_COOKIE_NAME = "worldforge_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const OWNER_ROLE: AuthRole = "owner";
 const COLLABORATOR_ROLE: AuthRole = "collaborator";
+const DEFAULT_OWNER_EMAIL = "owner@worldforge.local";
+const DEFAULT_OWNER_PASSWORD = "worldforge-owner";
 
 type StoredAccount = AuthAccountSummary & {
   passwordHash: string;
@@ -45,6 +47,22 @@ export class AuthError extends Error {
   ) {
     super(message);
     this.name = "AuthError";
+  }
+}
+
+function isLocalBootstrapHost(host: string): boolean {
+  return host === "127.0.0.1" || host === "localhost" || host === "::1";
+}
+
+export function assertSafeOwnerBootstrap(host: string): void {
+  const ownerEmail = (process.env.WORLDFORGE_OWNER_EMAIL ?? DEFAULT_OWNER_EMAIL).trim().toLowerCase();
+  const ownerPassword = (process.env.WORLDFORGE_OWNER_PASSWORD ?? DEFAULT_OWNER_PASSWORD).trim();
+
+  if (!isLocalBootstrapHost(host) && ownerEmail === DEFAULT_OWNER_EMAIL && ownerPassword === DEFAULT_OWNER_PASSWORD) {
+    throw new AuthError(
+      503,
+      "Configure WORLDFORGE_OWNER_EMAIL and WORLDFORGE_OWNER_PASSWORD before running WorldForge on a non-local host.",
+    );
   }
 }
 
@@ -165,7 +183,7 @@ export class FileSystemAuthStore {
     return state.accounts.map(scrubAccount).sort((left, right) => left.email.localeCompare(right.email));
   }
 
-  async createSession(login: AuthLoginRequest): Promise<{ cookie: string; payload: AuthSessionPayload; token: string }> {
+  async createSession(login: AuthLoginRequest): Promise<{ cookie: string; payload: AuthSessionPayload }> {
     const email = login.email.trim().toLowerCase();
     const password = login.password.trim();
 
@@ -200,7 +218,6 @@ export class FileSystemAuthStore {
 
     return {
       cookie: sessionCookie(token, expiresAt),
-      token,
       payload: {
         viewer: scrubAccount(account),
         visibilityOptions: allowedVisibilityOptions(account),
@@ -209,11 +226,8 @@ export class FileSystemAuthStore {
     };
   }
 
-  async resolveSession(
-    cookieHeader: string | undefined,
-    headerToken?: string | null,
-  ): Promise<{ cookie: string; payload: AuthSessionPayload; token: string } | null> {
-    const token = headerToken?.trim() || parseSessionToken(cookieHeader);
+  async resolveSession(cookieHeader: string | undefined): Promise<{ cookie: string; payload: AuthSessionPayload } | null> {
+    const token = parseSessionToken(cookieHeader);
     if (!token) {
       return null;
     }
@@ -246,7 +260,6 @@ export class FileSystemAuthStore {
       const viewer = scrubAccount(account);
       return {
         cookie: sessionCookie(token, new Date(session.expiresAt)),
-        token,
         payload: {
           viewer,
           visibilityOptions: allowedVisibilityOptions(viewer),
@@ -310,8 +323,8 @@ export class FileSystemAuthStore {
       return state;
     }
 
-    const ownerEmail = (process.env.WORLDFORGE_OWNER_EMAIL ?? "owner@worldforge.local").trim().toLowerCase();
-    const ownerPassword = (process.env.WORLDFORGE_OWNER_PASSWORD ?? "worldforge-owner").trim();
+    const ownerEmail = (process.env.WORLDFORGE_OWNER_EMAIL ?? DEFAULT_OWNER_EMAIL).trim().toLowerCase();
+    const ownerPassword = (process.env.WORLDFORGE_OWNER_PASSWORD ?? DEFAULT_OWNER_PASSWORD).trim();
     const ownerDisplayName = (process.env.WORLDFORGE_OWNER_NAME ?? os.userInfo().username ?? "WorldForge Owner").trim();
     const salt = randomBytes(16).toString("hex");
     const now = new Date().toISOString();
