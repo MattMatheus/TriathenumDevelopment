@@ -10,8 +10,12 @@ import type {
   ActorReactionRequest,
   AuthAccountProvisionRequest,
   AuthLoginRequest,
+  WorldConsistencyReviewRequest,
+  WorldDigestRequest,
   WorldEditorSuggestionRequest,
   WorldEditorProseAssistRequest,
+  WorldImportApplyRequest,
+  WorldImportReviewRequest,
   WorldBrowserMediaUploadRequest,
   WorldBrowserEntitySaveRequest,
 } from "../contracts/index.js";
@@ -21,9 +25,17 @@ import type { WorldEntityDraftRequest } from "../contracts/index.js";
 import { assertSafeOwnerBootstrap, AuthError, FileSystemAuthStore } from "./auth-service.js";
 import { PathContainmentError, RequestBodyError, readRequestBody, resolveStaticAssetPath } from "./http-utils.js";
 import { generateWorldEntityDraft } from "./draft-generation-service.js";
+import { generateWorldDigest } from "./digest-service.js";
 import { generateEditorSuggestions } from "./editor-suggestion-service.js";
+import { buildWorldExportPackage } from "./export-package-service.js";
+import { loadEntityGraph } from "./graph-service.js";
+import { applyImportPackage } from "./import-apply-service.js";
+import { reviewImportPackage } from "./import-review-service.js";
+import { loadWorldMapNavigation } from "./map-navigation-service.js";
 import { assistEditorProse } from "./prose-assistance-service.js";
+import { reviewWorldConsistency } from "./consistency-review-service.js";
 import { searchWorldSemantically } from "./semantic-search-service.js";
+import { loadWorldTimeline } from "./timeline-service.js";
 import {
   attachMediaToEntity,
   defaultWorldRoot,
@@ -91,6 +103,22 @@ async function sendFile(response: ServerResponse, filePath: string, contentType:
   response.writeHead(200, {
     "content-type": contentType,
     ...(downloadName ? { "content-disposition": `inline; filename="${safeDispositionFilename(downloadName)}"` } : {}),
+  });
+  response.end(contents);
+}
+
+function sendBuffer(
+  response: ServerResponse,
+  status: number,
+  contents: Buffer,
+  contentType: string,
+  downloadName?: string,
+  headers: Record<string, string> = {},
+) {
+  response.writeHead(status, {
+    "content-type": contentType,
+    ...(downloadName ? { "content-disposition": `attachment; filename="${safeDispositionFilename(downloadName)}"` } : {}),
+    ...headers,
   });
   response.end(contents);
 }
@@ -550,6 +578,225 @@ const server = createServer(async (request, response) => {
 
       sendJson(response, 500, {
         error: error instanceof Error ? error.message : "Unable to review editor suggestions.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/world/consistency-review") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const rawBody = await readJsonRequestBody(request, MAX_JSON_BODY_BYTES);
+      const payload = JSON.parse(rawBody) as WorldConsistencyReviewRequest;
+      const result = await reviewWorldConsistency(worldRoot, viewer, payload);
+      sendJson(response, 200, result, authHeaders(session));
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to review world consistency.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/world/timeline") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const result = await loadWorldTimeline(worldRoot, viewer);
+      sendJson(response, 200, result, authHeaders(session));
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to load the timeline workspace.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/world/graph") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    const entityId = requestUrl.searchParams.get("entityId")?.trim();
+    if (!entityId) {
+      sendJson(response, 400, { error: "An entityId query parameter is required." }, authHeaders(session));
+      return;
+    }
+
+    try {
+      const result = await loadEntityGraph(worldRoot, viewer, entityId);
+      if (!result) {
+        sendJson(response, 404, { error: "Entity graph not found." }, authHeaders(session));
+        return;
+      }
+
+      sendJson(response, 200, result, authHeaders(session));
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to load the graph explorer.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/world/digest") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const rawBody = await readJsonRequestBody(request, MAX_JSON_BODY_BYTES);
+      const payload = JSON.parse(rawBody) as WorldDigestRequest;
+      const result = await generateWorldDigest(worldRoot, viewer, payload);
+      sendJson(response, 200, result, authHeaders(session));
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to generate the world-state digest.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/world/map-navigation") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const result = await loadWorldMapNavigation(worldRoot, viewer);
+      sendJson(response, 200, result, authHeaders(session));
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to load the map-linked navigator.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/world/export-package") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const result = await buildWorldExportPackage(worldRoot, viewer);
+      sendBuffer(response, 200, result.contents, result.contentType, result.fileName, authHeaders(session));
+    } catch (error) {
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to export the world package.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/world/import-review") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const rawBody = await readJsonRequestBody(request, MAX_MEDIA_BODY_BYTES);
+      const payload = JSON.parse(rawBody) as WorldImportReviewRequest;
+      const result = await reviewImportPackage(worldRoot, viewer, payload);
+      sendJson(response, 200, result, authHeaders(session));
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to review the import package.",
+      });
+    }
+
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/world/import-apply") {
+    if (!viewer) {
+      sendJson(response, 401, { error: "Sign in is required." });
+      return;
+    }
+
+    try {
+      const rawBody = await readJsonRequestBody(request, MAX_MEDIA_BODY_BYTES);
+      const payload = JSON.parse(rawBody) as WorldImportApplyRequest;
+      const result = await applyImportPackage(worldRoot, viewer, payload);
+      sendJson(response, 200, result, authHeaders(session));
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+      if (error instanceof AuthError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Unable to apply the import package.",
       });
     }
 

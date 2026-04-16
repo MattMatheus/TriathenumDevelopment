@@ -13,3 +13,9 @@ No engineering story is currently waiting in Phase 1 ready.
 These are sequenced and ready for later promotion after the useful core is stable.
 
 No engineering story is currently waiting in Phase 2 ready.
+
+### Phase 3
+
+These are sequenced deferred-ready stories created from PM refinement of the canon-intelligence roadmap.
+
+No engineering story is currently waiting in Phase 3 ready.

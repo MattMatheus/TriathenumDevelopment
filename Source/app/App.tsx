@@ -8,6 +8,9 @@ import type {
   AuthSessionPayload,
   EntityMediaAsset,
   EntityVisibility,
+  WorldConsistencyFinding,
+  WorldConsistencyReviewPayload,
+  WorldDigestPayload,
   WorldEditorLinkSuggestion,
   WorldEditorProseAction,
   WorldEditorProseAssistPayload,
@@ -15,8 +18,13 @@ import type {
   WorldEditorSuggestionPayload,
   WorldEditorSummarySuggestion,
   WorldEntityDraftPayload,
+  WorldGraphPayload,
+  WorldImportApplyPayload,
+  WorldImportReviewPayload,
+  WorldMapNavigationPayload,
   WorldSearchMode,
   WorldSemanticSearchPayload,
+  WorldTimelinePayload,
   WorldBrowserEntityDetail,
   WorldBrowserMediaUploadRequest,
   WorldBrowserEntitySaveRequest,
@@ -91,6 +99,10 @@ type ProseSuggestionState = WorldEditorProseAssistPayload & {
 type EditorSuggestionState = WorldEditorSuggestionPayload & {
   status: "ready";
 };
+type ConsistencyReviewState = WorldConsistencyReviewPayload & {
+  status: "ready";
+};
+type ConsistencyFindingState = Record<string, "open" | "deferred" | "dismissed">;
 
 function formatFieldLabel(value: string): string {
   return value
@@ -270,6 +282,26 @@ export function App() {
   const [isRequestingProse, setIsRequestingProse] = useState(false);
   const [editorSuggestions, setEditorSuggestions] = useState<EditorSuggestionState | null>(null);
   const [isLoadingEditorSuggestions, setIsLoadingEditorSuggestions] = useState(false);
+  const [consistencyReview, setConsistencyReview] = useState<ConsistencyReviewState | null>(null);
+  const [consistencyFindingState, setConsistencyFindingState] = useState<ConsistencyFindingState>({});
+  const [isReviewingConsistency, setIsReviewingConsistency] = useState(false);
+  const [timelinePayload, setTimelinePayload] = useState<WorldTimelinePayload | null>(null);
+  const [isLoadingTimeline, setIsLoadingTimeline] = useState(false);
+  const [graphPayload, setGraphPayload] = useState<WorldGraphPayload | null>(null);
+  const [isLoadingGraph, setIsLoadingGraph] = useState(false);
+  const [digestPayload, setDigestPayload] = useState<WorldDigestPayload | null>(null);
+  const [digestScopeMode, setDigestScopeMode] = useState<"world" | "tag">("world");
+  const [digestTag, setDigestTag] = useState("");
+  const [isLoadingDigest, setIsLoadingDigest] = useState(false);
+  const [mapNavigation, setMapNavigation] = useState<WorldMapNavigationPayload | null>(null);
+  const [isLoadingMapNavigation, setIsLoadingMapNavigation] = useState(false);
+  const [selectedMapRegion, setSelectedMapRegion] = useState("all");
+  const [isExportingWorld, setIsExportingWorld] = useState(false);
+  const [importReview, setImportReview] = useState<WorldImportReviewPayload | null>(null);
+  const [isReviewingImport, setIsReviewingImport] = useState(false);
+  const [importApplyResult, setImportApplyResult] = useState<WorldImportApplyPayload | null>(null);
+  const [isApplyingImport, setIsApplyingImport] = useState(false);
+  const [lastImportPackage, setLastImportPackage] = useState<{ fileName: string; base64Data: string } | null>(null);
   const canManageAISettings = session?.viewer.role === "owner";
 
   async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
@@ -302,6 +334,8 @@ export function App() {
               setDraftProvenance(null);
               setProseSuggestion(null);
               setEditorSuggestions(null);
+              setConsistencyReview(null);
+              setConsistencyFindingState({});
               setIsEditing(false);
             });
           }
@@ -431,6 +465,89 @@ export function App() {
   }, [session, refreshVersion]);
 
   useEffect(() => {
+    if (!session || !selectedEntityId) {
+      setGraphPayload(null);
+      return;
+    }
+
+    const entityId = selectedEntityId;
+    let cancelled = false;
+    setIsLoadingGraph(true);
+
+    async function loadGraph() {
+      try {
+        const params = new URLSearchParams({ entityId });
+        const response = await apiFetch(`/api/world/graph?${params.toString()}`);
+        if (!response.ok) {
+          const body = (await response.json()) as { error?: string };
+          throw new Error(body.error ?? "Unable to load the graph explorer.");
+        }
+
+        const payload = (await response.json()) as WorldGraphPayload;
+        if (!cancelled) {
+          setGraphPayload(payload);
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingGraph(false);
+        }
+      }
+    }
+
+    void loadGraph();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEntityId, session, refreshVersion]);
+
+  useEffect(() => {
+    if (!session) {
+      setMapNavigation(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingMapNavigation(true);
+
+    async function loadMapNavigation() {
+      try {
+        const response = await apiFetch("/api/world/map-navigation");
+        if (!response.ok) {
+          const body = (await response.json()) as { error?: string };
+          throw new Error(body.error ?? "Unable to load the map-linked navigator.");
+        }
+
+        const payload = (await response.json()) as WorldMapNavigationPayload;
+        if (!cancelled) {
+          setMapNavigation(payload);
+          setSelectedMapRegion((current) =>
+            current === "all" || payload.regions.includes(current) ? current : payload.regions[0] ?? "all",
+          );
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingMapNavigation(false);
+        }
+      }
+    }
+
+    void loadMapNavigation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session, refreshVersion]);
+
+  useEffect(() => {
     if (!session) {
       setAISettings(null);
       setAIContext(null);
@@ -515,6 +632,45 @@ export function App() {
       cancelled = true;
     };
   }, [selectedEntityId, session, refreshVersion]);
+
+  useEffect(() => {
+    if (!session) {
+      setTimelinePayload(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingTimeline(true);
+
+    async function loadTimeline() {
+      try {
+        const response = await apiFetch("/api/world/timeline");
+        if (!response.ok) {
+          const body = (await response.json()) as { error?: string };
+          throw new Error(body.error ?? "Unable to load the timeline workspace.");
+        }
+
+        const payload = (await response.json()) as WorldTimelinePayload;
+        if (!cancelled) {
+          setTimelinePayload(payload);
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingTimeline(false);
+        }
+      }
+    }
+
+    void loadTimeline();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session, refreshVersion]);
 
   useEffect(() => {
     if (!selectedEntityId || !session) {
@@ -608,6 +764,8 @@ export function App() {
     if (!isEditing) {
       setProseSuggestion(null);
       setEditorSuggestions(null);
+      setConsistencyReview(null);
+      setConsistencyFindingState({});
     }
   }, [isEditing, selectedEntityId]);
 
@@ -663,6 +821,8 @@ export function App() {
         setDraftProvenance(null);
         setProseSuggestion(null);
         setEditorSuggestions(null);
+        setConsistencyReview(null);
+        setConsistencyFindingState({});
         setSelectedEntityId(saved.id);
         setIsEditing(false);
       });
@@ -724,6 +884,8 @@ export function App() {
         setDraftProvenance(null);
         setProseSuggestion(null);
         setEditorSuggestions(null);
+        setConsistencyReview(null);
+        setConsistencyFindingState({});
         setSelectedEntityId(null);
         setIsEditing(false);
       });
@@ -851,6 +1013,8 @@ export function App() {
         setDraftProvenance(provenance);
         setProseSuggestion(null);
         setEditorSuggestions(null);
+        setConsistencyReview(null);
+        setConsistencyFindingState({});
         setEditorState(buildEditorStateFromDraft(draft, defaultVisibleOption(session)));
       });
     } catch (caughtError) {
@@ -912,6 +1076,111 @@ export function App() {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
       setIsRequestingProse(false);
+    }
+  }
+
+  async function handleExportWorldPackage() {
+    setError(null);
+    setIsExportingWorld(true);
+
+    try {
+      const response = await apiFetch("/api/world/export-package");
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to export the world package.");
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = "worldforge-export.tar";
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsExportingWorld(false);
+    }
+  }
+
+  async function handleReviewImportPackage(file: File) {
+    setError(null);
+    setIsReviewingImport(true);
+    setImportApplyResult(null);
+
+    try {
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error ?? new Error("Unable to read file."));
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.readAsDataURL(file);
+      });
+
+      const response = await apiFetch("/api/world/import-review", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          fileName: file.name,
+          base64Data,
+        }),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to review the import package.");
+      }
+
+      const payload = (await response.json()) as WorldImportReviewPayload;
+      setImportReview(payload);
+      setLastImportPackage({
+        fileName: file.name,
+        base64Data,
+      });
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsReviewingImport(false);
+    }
+  }
+
+  async function handleApplyImportPackage() {
+    if (!lastImportPackage) {
+      setError("Review a package first before applying it.");
+      return;
+    }
+
+    setError(null);
+    setIsApplyingImport(true);
+
+    try {
+      const response = await apiFetch("/api/world/import-apply", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          ...lastImportPackage,
+          conflictPolicy: "skip_on_conflict",
+        }),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to apply the import package.");
+      }
+
+      const payload = (await response.json()) as WorldImportApplyPayload;
+      setImportApplyResult(payload);
+      setRefreshVersion((current) => current + 1);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsApplyingImport(false);
     }
   }
 
@@ -1042,6 +1311,84 @@ export function App() {
     dismissSummarySuggestion();
   }
 
+  async function handleReviewConsistency() {
+    setError(null);
+    setIsReviewingConsistency(true);
+
+    try {
+      const response = await apiFetch("/api/world/consistency-review", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(selectedEntityId ? { entityId: selectedEntityId } : {}),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to review world consistency.");
+      }
+
+      const payload = (await response.json()) as WorldConsistencyReviewPayload;
+      if (payload.status !== "ready") {
+        throw new Error(payload.unavailableReason ?? "Consistency review is unavailable.");
+      }
+
+      setConsistencyReview({
+        ...payload,
+        status: "ready",
+      });
+      setConsistencyFindingState(
+        Object.fromEntries(payload.findings.map((finding) => [finding.id, "open"] as const)),
+      );
+    } catch (caughtError) {
+      setConsistencyReview(null);
+      setConsistencyFindingState({});
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsReviewingConsistency(false);
+    }
+  }
+
+  function updateConsistencyFindingState(finding: WorldConsistencyFinding, state: "open" | "deferred" | "dismissed") {
+    setConsistencyFindingState((current) => ({
+      ...current,
+      [finding.id]: state,
+    }));
+  }
+
+  async function handleGenerateDigest() {
+    setError(null);
+    setIsLoadingDigest(true);
+
+    try {
+      const request =
+        digestScopeMode === "tag" && digestTag.trim()
+          ? { mode: "tag" as const, tag: digestTag.trim() }
+          : { mode: "world" as const };
+      const response = await apiFetch("/api/world/digest", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to generate the world-state digest.");
+      }
+
+      const payload = (await response.json()) as WorldDigestPayload;
+      setDigestPayload(payload);
+    } catch (caughtError) {
+      setDigestPayload(null);
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsLoadingDigest(false);
+    }
+  }
+
   async function handleSaveAISettings(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -1086,6 +1433,14 @@ export function App() {
     proseSuggestion && editorState ? previewEditorProseResult(editorState.body, proseSuggestion) : null;
   const detailReferenceSummary =
     detail && typeof detail.fields.reference_summary === "string" ? detail.fields.reference_summary : null;
+  const visibleMapPins =
+    mapNavigation?.pins.filter((pin) => selectedMapRegion === "all" || pin.region === selectedMapRegion) ?? [];
+  const visibleConsistencyFindings = consistencyReview?.findings.filter(
+    (finding) => consistencyFindingState[finding.id] !== "dismissed",
+  ) ?? [];
+  const deferredConsistencyCount = visibleConsistencyFindings.filter(
+    (finding) => consistencyFindingState[finding.id] === "deferred",
+  ).length;
 
   if (!session) {
     return (
@@ -2025,6 +2380,349 @@ export function App() {
             )}
           </article>
 
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Graph Explorer</h2>
+              <p>A scoped neighborhood view keeps relationship structure readable instead of exploding into a whole-world graph.</p>
+            </header>
+            {graphPayload ? (
+              <div className="stack">
+                <p className="placeholder">{graphPayload.summary}</p>
+                {graphPayload.nodes.length ? (
+                  <>
+                    <section className="detail-section">
+                      <h3>Nodes</h3>
+                      <ul className="sources">
+                        {graphPayload.nodes.map((node) => (
+                          <li key={node.entityId}>
+                            <div className="section-row">
+                              <strong>{node.entityName}</strong>
+                              <span className="queue-count">{node.role}</span>
+                            </div>
+                            <span>{typeLabels[node.entityType]}</span>
+                            {node.role === "neighbor" ? (
+                              <div className="editor-actions">
+                                <button type="button" onClick={() => setSelectedEntityId(node.entityId)}>
+                                  Pivot Here
+                                </button>
+                              </div>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                    <section className="detail-section">
+                      <h3>Edges</h3>
+                      <ul className="sources">
+                        {graphPayload.edges.map((edge) => {
+                          const sourceName =
+                            graphPayload.nodes.find((node) => node.entityId === edge.sourceEntityId)?.entityName ?? edge.sourceEntityId;
+                          const targetName =
+                            graphPayload.nodes.find((node) => node.entityId === edge.targetEntityId)?.entityName ?? edge.targetEntityId;
+                          return (
+                            <li key={edge.id}>
+                              <strong>{sourceName}</strong>
+                              <span>
+                                {edge.label} {"->"} {targetName}
+                              </span>
+                              <p>{edge.summary}</p>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
+                  </>
+                ) : (
+                  <p className="placeholder">No visible neighbors surfaced for this entity yet.</p>
+                )}
+              </div>
+            ) : (
+              <p className="placeholder">
+                {isLoadingGraph ? "Loading graph explorer..." : "Select an entity to inspect its relationship neighborhood."}
+              </p>
+            )}
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Map Navigation</h2>
+              <p>Location pins provide a lightweight spatial wayfinding layer without turning the app into a cartography tool.</p>
+            </header>
+            {mapNavigation ? (
+              <div className="stack">
+                <p className="placeholder">{mapNavigation.summary}</p>
+                <div className="editor-row">
+                  <label>
+                    Region
+                    <select value={selectedMapRegion} onChange={(event) => setSelectedMapRegion(event.target.value)}>
+                      <option value="all">All Regions</option>
+                      {mapNavigation.regions.map((region) => (
+                        <option key={region} value={region}>
+                          {region}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <section
+                  className="map-surface"
+                  style={
+                    mapNavigation.hasBackdrop && mapNavigation.backdropUrl
+                      ? { backgroundImage: `linear-gradient(rgba(247,243,232,0.18), rgba(247,243,232,0.18)), url(${mapNavigation.backdropUrl})` }
+                      : undefined
+                  }
+                >
+                  {visibleMapPins.map((pin) => (
+                    <button
+                      key={pin.entityId}
+                      type="button"
+                      className="map-pin"
+                      style={{ left: `${pin.x}%`, top: `${pin.y}%` }}
+                      onClick={() => setSelectedEntityId(pin.entityId)}
+                    >
+                      <span>{pin.entityName}</span>
+                    </button>
+                  ))}
+                  {!visibleMapPins.length ? (
+                    <p className="placeholder map-empty">
+                      {mapNavigation.hasBackdrop
+                        ? "No visible pins are configured for this map scope yet."
+                        : "No map asset or pinned locations are configured yet."}
+                    </p>
+                  ) : null}
+                </section>
+                {visibleMapPins.length ? (
+                  <ul className="sources">
+                    {visibleMapPins.map((pin) => (
+                      <li key={`list-${pin.entityId}`}>
+                        <div className="section-row">
+                          <strong>{pin.entityName}</strong>
+                          <span className="queue-count">{pin.region}</span>
+                        </div>
+                        <p>{pin.summary}</p>
+                        <div className="editor-actions">
+                          <button type="button" onClick={() => setSelectedEntityId(pin.entityId)}>
+                            Open Detail
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : (
+              <p className="placeholder">{isLoadingMapNavigation ? "Loading map navigation..." : "Map navigation is unavailable right now."}</p>
+            )}
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>World Export</h2>
+              <p>Portable export stays markdown-first and deterministic so later import work has a trustworthy package shape.</p>
+            </header>
+            <div className="stack">
+              <p className="placeholder">
+                {session?.viewer.role === "owner"
+                  ? "This export includes the full world visible to the owner, including restricted entries."
+                  : "This export includes only the entries visible to your current collaborator role."}
+              </p>
+              <div className="editor-actions">
+                <button type="button" onClick={handleExportWorldPackage} disabled={isExportingWorld}>
+                  {isExportingWorld ? "Exporting..." : "Download Export Package"}
+                </button>
+              </div>
+            </div>
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Import Review</h2>
+              <p>Dry-run review validates export-shaped packages, surfaces conflicts, and performs no world writes.</p>
+            </header>
+            <div className="stack">
+              <p className="placeholder">
+                {session?.viewer.role === "owner"
+                  ? "Owner uploads stay review-only in this slice: valid items, conflicts, and missing media are surfaced before any future apply path exists."
+                  : "Import review is currently restricted to the owner account."}
+              </p>
+              {session?.viewer.role === "owner" ? (
+                <label className="field">
+                  <span>Package File</span>
+                  <input
+                    type="file"
+                    accept=".tar,application/x-tar"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) {
+                        void handleReviewImportPackage(file);
+                        event.target.value = "";
+                      }
+                    }}
+                  />
+                </label>
+              ) : null}
+              {importReview ? (
+                <div className="stack">
+                  <p className="placeholder">{importReview.summary}</p>
+                  <div className="section-row">
+                    <strong>{importReview.fileName}</strong>
+                    <span className="queue-count">{importReview.packageKind}</span>
+                  </div>
+                  <p className="placeholder">
+                    Valid documents: {importReview.validDocumentCount} • Valid media: {importReview.validMediaCount} • Issues: {importReview.issueCount}
+                  </p>
+                  {importReview.issues.length ? (
+                    <ul className="sources">
+                      {importReview.issues.map((entry) => (
+                        <li key={entry.id}>
+                          <div className="section-row">
+                            <strong>{entry.kind.replace(/_/g, " ")}</strong>
+                            <span className="queue-count">{entry.severity}</span>
+                          </div>
+                          <p>{entry.message}</p>
+                          {entry.path ? <p className="path-copy">{entry.path}</p> : null}
+                          {entry.entityId ? <p className="path-copy">{entry.entityId}</p> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="placeholder">No issues detected in the reviewed package.</p>
+                  )}
+                  <div className="editor-actions">
+                    <button type="button" onClick={handleApplyImportPackage} disabled={isApplyingImport}>
+                      {isApplyingImport ? "Applying..." : "Apply With Skip-On-Conflict"}
+                    </button>
+                  </div>
+                  {importApplyResult ? (
+                    <div className="stack">
+                      <p className="placeholder">{importApplyResult.summary}</p>
+                      <p className="placeholder">
+                        Created: {importApplyResult.createdCount} • Skipped: {importApplyResult.skippedCount} • Failed: {importApplyResult.failedCount}
+                      </p>
+                      <ul className="sources">
+                        {importApplyResult.actions.map((action) => (
+                          <li key={action.id}>
+                            <div className="section-row">
+                              <strong>{action.targetType}</strong>
+                              <span className="queue-count">{action.kind}</span>
+                            </div>
+                            <p>{action.message}</p>
+                            <p className="path-copy">{action.path}</p>
+                            {action.entityId ? <p className="path-copy">{action.entityId}</p> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="placeholder">{isReviewingImport ? "Reviewing import package..." : "Upload an export-shaped package to inspect it without writing world files."}</p>
+              )}
+            </div>
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>World-State Digest</h2>
+              <p>Review briefs stay cited and non-canonical so they help orientation without pretending to be source truth.</p>
+            </header>
+            <section className="detail-section">
+              <div className="editor-row">
+                <label>
+                  Scope
+                  <select value={digestScopeMode} onChange={(event) => setDigestScopeMode(event.target.value as "world" | "tag")}>
+                    <option value="world">Visible World</option>
+                    <option value="tag">Tag Scope</option>
+                  </select>
+                </label>
+                <label>
+                  Tag
+                  <input
+                    value={digestTag}
+                    onChange={(event) => setDigestTag(event.target.value)}
+                    placeholder="history"
+                    disabled={digestScopeMode !== "tag"}
+                  />
+                </label>
+              </div>
+              <div className="editor-actions">
+                <button type="button" onClick={handleGenerateDigest} disabled={isLoadingDigest}>
+                  {isLoadingDigest ? "Generating..." : "Generate Digest"}
+                </button>
+              </div>
+            </section>
+            <section className="detail-section">
+              {digestPayload ? (
+                <div className="stack">
+                  <p className="placeholder">{digestPayload.summary}</p>
+                  {digestPayload.providerLabel ? (
+                    <p className="placeholder">Provider baseline: {digestPayload.providerLabel}</p>
+                  ) : null}
+                  {digestPayload.sections.length ? (
+                    <ul className="sources">
+                      {digestPayload.sections.map((section) => (
+                        <li key={section.id}>
+                          <strong>{section.title}</strong>
+                          <p>{section.summary}</p>
+                          <ul className="sources">
+                            {section.citations.map((citation) => (
+                              <li key={`${section.id}-${citation.entityId}`}>
+                                <strong>{citation.entityName}</strong>
+                                <span>{typeLabels[citation.entityType]}</span>
+                                <p>{citation.excerpt}</p>
+                                <p className="path-copy">{citation.path}</p>
+                              </li>
+                            ))}
+                          </ul>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="placeholder">No digest sections surfaced for this scope yet.</p>
+                  )}
+                </div>
+              ) : (
+                <p className="placeholder">Generate a cited review brief for the visible world or a selected tag scope.</p>
+              )}
+            </section>
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Timeline Workspace</h2>
+              <p>Chronology stays readable even when the world mixes exact dates, ranges, and softer era labels.</p>
+            </header>
+            {timelinePayload ? (
+              <div className="stack">
+                <p className="placeholder">{timelinePayload.summary}</p>
+                {timelinePayload.items.length ? (
+                  <ul className="sources">
+                    {timelinePayload.items.map((item) => (
+                      <li key={item.entityId}>
+                        <div className="section-row">
+                          <strong>{item.title}</strong>
+                          <span className="queue-count">{item.chronologyLabel}</span>
+                        </div>
+                        <span>{typeLabels[item.entityType]} • {item.precision}</span>
+                        <p>{item.summary}</p>
+                        <p className="path-copy">{item.path}</p>
+                        <div className="editor-actions">
+                          <button type="button" onClick={() => setSelectedEntityId(item.entityId)}>
+                            Open Detail
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="placeholder">Add chronology fields like `date`, `start_date`, `end_date`, `era`, or `chronology_label` to surface timeline items here.</p>
+                )}
+              </div>
+            ) : (
+              <p className="placeholder">{isLoadingTimeline ? "Loading timeline workspace..." : "Timeline workspace is unavailable right now."}</p>
+            )}
+          </article>
+
           {searchMode === "semantic" ? (
             <article className="panel">
               <header className="panel-header">
@@ -2061,6 +2759,88 @@ export function App() {
               )}
             </article>
           ) : null}
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Consistency Review</h2>
+              <p>Run a cited canon check and keep every finding in a human review queue.</p>
+            </header>
+
+            <section className="detail-section">
+              <div className="section-row">
+                <h3>{selectedEntityId ? "Selected Scope" : "Visible Scope"}</h3>
+                <span className="queue-count">
+                  {consistencyReview
+                    ? `${visibleConsistencyFindings.length}${deferredConsistencyCount ? `/${deferredConsistencyCount} deferred` : ""}`
+                    : "idle"}
+                </span>
+              </div>
+              <p className="placeholder">
+                {selectedEntityId
+                  ? "Review the selected entity against visible reciprocal canon and corroboration patterns."
+                  : "Review the visible world for contradictions and missing corroboration with citations."}
+              </p>
+              <div className="editor-actions">
+                <button type="button" onClick={handleReviewConsistency} disabled={isReviewingConsistency}>
+                  {isReviewingConsistency ? "Reviewing..." : selectedEntityId ? "Review Selected Entity" : "Review Visible World"}
+                </button>
+              </div>
+            </section>
+
+            <section className="detail-section">
+              {consistencyReview ? (
+                <div className="stack">
+                  <p className="placeholder">{consistencyReview.summary}</p>
+                  {consistencyReview.providerLabel ? (
+                    <p className="placeholder">Provider baseline: {consistencyReview.providerLabel}</p>
+                  ) : null}
+                  {visibleConsistencyFindings.length ? (
+                    <ul className="sources">
+                      {visibleConsistencyFindings.map((finding) => (
+                        <li key={finding.id}>
+                          <div className="section-row">
+                            <strong>{finding.title}</strong>
+                            <span className="queue-count">
+                              {consistencyFindingState[finding.id] === "deferred"
+                                ? "deferred"
+                                : `${finding.findingType} • ${finding.confidence}`}
+                            </span>
+                          </div>
+                          <p>{finding.summary}</p>
+                          <ul className="sources">
+                            {finding.citations.map((citation) => (
+                              <li key={`${finding.id}-${citation.entityId}`}>
+                                <strong>{citation.entityName}</strong>
+                                <span>{typeLabels[citation.entityType]}</span>
+                                <p>{citation.excerpt}</p>
+                                <p className="path-copy">{citation.path}</p>
+                              </li>
+                            ))}
+                          </ul>
+                          <div className="editor-actions">
+                            <button type="button" onClick={() => updateConsistencyFindingState(finding, "deferred")}>
+                              Defer
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-action"
+                              onClick={() => updateConsistencyFindingState(finding, "dismissed")}
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="placeholder">No open findings are waiting in the current review queue.</p>
+                  )}
+                </div>
+              ) : (
+                <p className="placeholder">Run a review to inspect contradiction and corroboration findings with citations.</p>
+              )}
+            </section>
+          </article>
 
           <article className="panel">
             <header className="panel-header">

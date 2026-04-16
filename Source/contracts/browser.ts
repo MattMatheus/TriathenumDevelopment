@@ -41,6 +41,180 @@ export type WorldSemanticSearchPayload = {
   matches: WorldBrowserEntitySummary[];
 };
 
+export type WorldConsistencyReviewRequest = {
+  entityId?: string;
+};
+
+export type WorldConsistencyReviewScope = {
+  mode: "world" | "entity";
+  entityId?: string;
+  entityName?: string;
+};
+
+export type WorldConsistencyFinding = {
+  id: string;
+  findingType: "contradiction" | "missing_corroboration";
+  title: string;
+  summary: string;
+  confidence: "high" | "medium";
+  citations: WorldSemanticCitation[];
+  relatedEntityIds: string[];
+};
+
+export type WorldConsistencyReviewPayload = {
+  status: "ready" | "unavailable";
+  unavailableReason?: string;
+  providerLabel?: string;
+  scope: WorldConsistencyReviewScope;
+  summary: string;
+  findings: WorldConsistencyFinding[];
+};
+
+export type WorldTimelinePrecision = "day" | "month" | "year" | "range" | "relative";
+
+export type WorldTimelineItem = {
+  entityId: string;
+  entityName: string;
+  entityType: WorldEntityType;
+  path: string;
+  title: string;
+  chronologyLabel: string;
+  precision: WorldTimelinePrecision;
+  summary: string;
+};
+
+export type WorldTimelinePayload = {
+  scope: "world";
+  summary: string;
+  items: WorldTimelineItem[];
+};
+
+export type WorldGraphNode = {
+  entityId: string;
+  entityName: string;
+  entityType: WorldEntityType;
+  role: "center" | "neighbor";
+};
+
+export type WorldGraphEdge = {
+  id: string;
+  sourceEntityId: string;
+  targetEntityId: string;
+  label: string;
+  direction: "outbound" | "inbound";
+  summary: string;
+};
+
+export type WorldGraphPayload = {
+  scope: "entity";
+  entityId: string;
+  entityName: string;
+  summary: string;
+  nodes: WorldGraphNode[];
+  edges: WorldGraphEdge[];
+};
+
+export type WorldDigestScope = {
+  mode: "world" | "tag";
+  tag?: string;
+};
+
+export type WorldDigestRequest = WorldDigestScope;
+
+export type WorldDigestSection = {
+  id: string;
+  title: string;
+  summary: string;
+  citations: WorldSemanticCitation[];
+};
+
+export type WorldDigestPayload = {
+  status: "ready" | "unavailable";
+  unavailableReason?: string;
+  providerLabel?: string;
+  scope: WorldDigestScope;
+  summary: string;
+  sections: WorldDigestSection[];
+};
+
+export type WorldMapPin = {
+  entityId: string;
+  entityName: string;
+  region: string;
+  x: number;
+  y: number;
+  summary: string;
+};
+
+export type WorldMapNavigationPayload = {
+  scope: "world";
+  summary: string;
+  regions: string[];
+  hasBackdrop: boolean;
+  backdropUrl?: string;
+  backdropLabel?: string;
+  pins: WorldMapPin[];
+};
+
+export type WorldImportReviewRequest = {
+  fileName: string;
+  base64Data: string;
+};
+
+export type WorldImportReviewIssue = {
+  id: string;
+  kind:
+    | "invalid_package"
+    | "unsupported_entry"
+    | "malformed_document"
+    | "duplicate_entry_path"
+    | "duplicate_entity_id"
+    | "path_conflict"
+    | "media_missing";
+  severity: "error" | "warning";
+  path?: string;
+  entityId?: string;
+  message: string;
+};
+
+export type WorldImportReviewPayload = {
+  status: "ready";
+  summary: string;
+  fileName: string;
+  packageKind: "worldforge-export" | "unknown";
+  validDocumentCount: number;
+  validMediaCount: number;
+  issueCount: number;
+  issues: WorldImportReviewIssue[];
+};
+
+export type WorldImportConflictPolicy = "skip_on_conflict";
+
+export type WorldImportApplyRequest = {
+  fileName: string;
+  base64Data: string;
+  conflictPolicy: WorldImportConflictPolicy;
+};
+
+export type WorldImportApplyAction = {
+  id: string;
+  kind: "created" | "skipped" | "failed";
+  targetType: "document" | "media";
+  path: string;
+  entityId?: string;
+  message: string;
+};
+
+export type WorldImportApplyPayload = {
+  status: "ready";
+  summary: string;
+  conflictPolicy: WorldImportConflictPolicy;
+  createdCount: number;
+  skippedCount: number;
+  failedCount: number;
+  actions: WorldImportApplyAction[];
+};
+
 export type WorldEntityDraftRequest = {
   entityType: WorldEntityType;
   proposedName?: string;

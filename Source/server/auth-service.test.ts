@@ -92,6 +92,46 @@ describe("FileSystemAuthStore", () => {
     const accounts = await store.listAccounts(owner);
     expect(accounts.map((item) => item.email)).toEqual(["owner@example.com", "writer@example.com"]);
   });
+
+  it("returns collaborator session permissions that match the approved RBAC model", async () => {
+    const store = await createStore();
+    const owner = await loginOwner(store);
+    await store.createOwnerManagedAccount(owner, {
+      email: "writer@example.com",
+      displayName: "Writer",
+      password: "writer-secret",
+    });
+
+    const result = await store.createSession({
+      email: "writer@example.com",
+      password: "writer-secret",
+    });
+
+    expect(result.payload.viewer.role).toBe("collaborator");
+    expect(result.payload.canManageAccounts).toBe(false);
+    expect(result.payload.visibilityOptions).toEqual(["all_users"]);
+  });
+
+  it("resolves an existing session without needing a full account-session scan", async () => {
+    const store = await createStore();
+    const owner = await loginOwner(store);
+    await store.createOwnerManagedAccount(owner, {
+      email: "writer@example.com",
+      displayName: "Writer",
+      password: "writer-secret",
+    });
+
+    const session = await store.createSession({
+      email: "writer@example.com",
+      password: "writer-secret",
+    });
+
+    const resolved = await store.resolveSession(session.cookie);
+
+    expect(resolved).not.toBeNull();
+    expect(resolved?.payload.viewer.email).toBe("writer@example.com");
+    expect(resolved?.payload.visibilityOptions).toEqual(["all_users"]);
+  });
 });
 
 describe("assertSafeOwnerBootstrap", () => {

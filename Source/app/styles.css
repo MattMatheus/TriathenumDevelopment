@@ -357,6 +357,47 @@ select {
   background: rgba(214, 227, 215, 0.4);
 }
 
+.map-surface {
+  position: relative;
+  min-height: 320px;
+  border-radius: 18px;
+  border: 1px solid rgba(86, 108, 93, 0.14);
+  background:
+    linear-gradient(rgba(247, 243, 232, 0.12), rgba(247, 243, 232, 0.12)),
+    linear-gradient(90deg, rgba(31, 92, 63, 0.08) 1px, transparent 1px),
+    linear-gradient(rgba(31, 92, 63, 0.08) 1px, transparent 1px),
+    radial-gradient(circle at top, rgba(214, 227, 215, 0.6), rgba(255, 255, 255, 0.75));
+  background-size: auto, 12% 100%, 100% 12%, cover;
+  background-position: center;
+  overflow: hidden;
+}
+
+.map-pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border: 0;
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  background: rgba(31, 92, 63, 0.92);
+  color: #f6fbf5;
+  font-weight: 700;
+  box-shadow: 0 10px 22px rgba(31, 92, 63, 0.18);
+  cursor: pointer;
+}
+
+.map-pin span {
+  display: block;
+  white-space: nowrap;
+}
+
+.map-empty {
+  position: absolute;
+  inset: auto 1rem 1rem 1rem;
+  padding: 0.8rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
 .editor-columns,
 .editor-row {
   display: grid;
@@ -532,5 +573,9 @@ summary {
   .prose-preview-grid,
   .prose-context-grid {
     grid-template-columns: 1fr;
+  }
+
+  .map-surface {
+    min-height: 260px;
   }
 }
