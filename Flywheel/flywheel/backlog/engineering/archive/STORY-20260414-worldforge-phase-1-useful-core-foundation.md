@@ -3,7 +3,7 @@
 ## Metadata
 - `id`: STORY-20260414-worldforge-phase-1-useful-core-foundation
 - `owner_role`: Product Manager
-- `status`: intake
+- `status`: archive
 - `source`: planning
 - `decision_refs`: [PLAN-2026-04-14-worldforge-roadmap-and-product-phase]
 - `success_metric`: PM refines the useful-core roadmap into a bounded sequence of implementation-ready stories that can deliver a genuinely usable markdown-first worldbuilding app without depending on AI features.
@@ -55,4 +55,9 @@ The WorldForge specification defines a strong Phase 1 vision, but it is still to
 
 ## Next Step
 
-PM refinement and queue ordering.
+Archived after PM refinement and engineering execution completed the useful-core decomposition.
+
+## Archive Rationale
+
+- the useful-core umbrella item has already been decomposed into bounded stories that were implemented and accepted
+- keeping it in intake would incorrectly suggest that Phase 1 backlog shaping is still pending

@@ -3,7 +3,7 @@
 ## Metadata
 - `id`: STORY-20260414-worldforge-phase-2-ai-collaboration-layer
 - `owner_role`: Product Manager
-- `status`: intake
+- `status`: archive
 - `source`: planning
 - `decision_refs`: [PLAN-2026-04-14-worldforge-roadmap-and-product-phase]
 - `success_metric`: PM refines the AI collaboration roadmap into bounded follow-on stories that layer safely on top of the useful core with explicit provider, grounding, and approval constraints.
@@ -56,4 +56,9 @@ The WorldForge specification includes a rich AI feature set, but these capabilit
 
 ## Next Step
 
-PM refinement after the useful-core backlog spine is established.
+Archived after PM refinement and engineering execution completed the AI collaboration decomposition.
+
+## Archive Rationale
+
+- the AI collaboration umbrella item has already been decomposed into bounded stories that were implemented and accepted
+- keeping it in intake would incorrectly suggest that Phase 2 backlog shaping is still pending
