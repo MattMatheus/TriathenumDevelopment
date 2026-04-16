@@ -65,6 +65,13 @@ podman compose up --build
 
 That starts a single `worldforge` service on `http://127.0.0.1:4174`.
 
+Default compose sign-in credentials:
+
+- email: `owner@worldforge.container`
+- password: `worldforge-compose-owner`
+
+The compose stack keeps auth and AI settings state in a separate named volume so the mounted fixture world does not override the container bootstrap account.
+
 For background startup:
 
 ```bash
@@ -86,6 +93,8 @@ podman compose down
 - `WORLDFORGE_OWNER_NAME` optional convenience label
 
 The current defaults are only safe for local-only startup on `127.0.0.1`, `localhost`, or `::1`. For any non-local host bind, set explicit owner credentials before starting WorldForge.
+
+The Podman compose path in this repo already provides non-default fallback owner credentials so the container can boot on `0.0.0.0` without tripping that safety guard. Override them in your own environment for any real deployment.
 
 ### Common Runtime Variables
 

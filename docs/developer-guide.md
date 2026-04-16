@@ -70,6 +70,13 @@ podman compose up --build
 
 The compose file builds [Source/Dockerfile](/Users/foundry/TriathenumDevelopment/Source/Dockerfile), publishes port `4174`, mounts the fixture world at `/world`, and sets `HOST=0.0.0.0` so the service is reachable through Podman port publishing.
 
+Default compose bootstrap credentials:
+
+- email: `owner@worldforge.container`
+- password: `worldforge-compose-owner`
+
+Compose auth and AI settings state are stored in a separate named volume mounted at `/state`, with `TRIATHENUM_AUTH_ROOT=/state/auth` and `TRIATHENUM_AI_SETTINGS_ROOT=/state/ai`. That keeps fixture-world bootstrap state from overriding the container owner account.
+
 The compose filename remains `docker-compose.yml`. Do not read that filename as a Docker-only instruction in this repo.
 
 ## Environment Variables
@@ -103,6 +110,8 @@ Current runtime knobs surfaced by the server/auth/AI services:
   - owner bootstrap display name
 
 For non-local hosts, set explicit owner credentials. The server rejects the default local bootstrap credentials when not bound to a local-only host.
+
+The checked-in compose file avoids that failure by supplying non-default fallback owner credentials for the container path.
 
 ## Architecture Notes
 

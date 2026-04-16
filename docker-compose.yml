@@ -10,8 +10,14 @@ services:
       PORT: "4174"
       TRIATHENUM_WORLD_ROOT: /world
       TRIATHENUM_VAULT_ROOT: /optional-canon
-      WORLDFORGE_OWNER_EMAIL: ${WORLDFORGE_OWNER_EMAIL:-owner@worldforge.local}
-      WORLDFORGE_OWNER_PASSWORD: ${WORLDFORGE_OWNER_PASSWORD:-worldforge-owner}
+      TRIATHENUM_AUTH_ROOT: /state/auth
+      TRIATHENUM_AI_SETTINGS_ROOT: /state/ai
+      WORLDFORGE_OWNER_EMAIL: ${WORLDFORGE_OWNER_EMAIL:-owner@worldforge.container}
+      WORLDFORGE_OWNER_PASSWORD: ${WORLDFORGE_OWNER_PASSWORD:-worldforge-compose-owner}
       WORLDFORGE_OWNER_NAME: ${WORLDFORGE_OWNER_NAME:-WorldForge Owner}
     volumes:
       - ./Source/world/__fixtures__/world:/world
+      - worldforge_state:/state
+
+volumes:
+  worldforge_state:
