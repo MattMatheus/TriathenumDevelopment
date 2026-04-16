@@ -188,6 +188,33 @@ export type WorldImportReviewPayload = {
   issues: WorldImportReviewIssue[];
 };
 
+export type WorldImportConflictPolicy = "skip_on_conflict";
+
+export type WorldImportApplyRequest = {
+  fileName: string;
+  base64Data: string;
+  conflictPolicy: WorldImportConflictPolicy;
+};
+
+export type WorldImportApplyAction = {
+  id: string;
+  kind: "created" | "skipped" | "failed";
+  targetType: "document" | "media";
+  path: string;
+  entityId?: string;
+  message: string;
+};
+
+export type WorldImportApplyPayload = {
+  status: "ready";
+  summary: string;
+  conflictPolicy: WorldImportConflictPolicy;
+  createdCount: number;
+  skippedCount: number;
+  failedCount: number;
+  actions: WorldImportApplyAction[];
+};
+
 export type WorldEntityDraftRequest = {
   entityType: WorldEntityType;
   proposedName?: string;

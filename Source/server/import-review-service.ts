@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type {
   EntityDocument,
+  EntityMediaAsset,
   WorldImportReviewIssue,
   WorldImportReviewPayload,
   WorldImportReviewRequest,
@@ -15,9 +16,26 @@ type TarEntry = {
   contents: Buffer;
 };
 
+export type ImportPackageDocument = {
+  entryPath: string;
+  source: string;
+  document: EntityDocument;
+};
+
 type ExportManifest = {
   packageKind?: string;
   schemaVersion?: number;
+};
+
+export type ImportPackageAnalysis = {
+  fileName: string;
+  packageKind: "worldforge-export" | "unknown";
+  entries: TarEntry[];
+  documents: ImportPackageDocument[];
+  mediaEntries: TarEntry[];
+  issues: WorldImportReviewIssue[];
+  validDocumentCount: number;
+  validMediaCount: number;
 };
 
 function normalizeArchivePath(value: string): string {
@@ -82,15 +100,18 @@ function summaryFor(validDocumentCount: number, validMediaCount: number, issues:
   return `Dry-run review found ${validDocumentCount} valid document${validDocumentCount === 1 ? "" : "s"}, ${validMediaCount} valid media asset${validMediaCount === 1 ? "" : "s"}, ${errors} error${errors === 1 ? "" : "s"}, and ${warnings} warning${warnings === 1 ? "" : "s"}.`;
 }
 
-export async function reviewImportPackage(
-  worldRoot: string,
-  viewer: AuthenticatedViewer,
-  request: WorldImportReviewRequest,
-): Promise<WorldImportReviewPayload> {
-  if (viewer.role !== "owner") {
-    throw new AuthError(403, "Only the owner can review import packages.");
-  }
+function relativeDocumentPath(worldRoot: string, document: EntityDocument): string {
+  return normalizeArchivePath(path.relative(worldRoot, document.path));
+}
 
+function issueTargetsDocument(issue: WorldImportReviewIssue, document: ImportPackageDocument, worldRoot: string): boolean {
+  return (
+    (issue.entityId !== undefined && issue.entityId === document.document.envelope.id) ||
+    (issue.path !== undefined && issue.path === relativeDocumentPath(worldRoot, document.document))
+  );
+}
+
+export async function analyzeImportPackage(worldRoot: string, request: WorldImportReviewRequest): Promise<ImportPackageAnalysis> {
   const fileName = request.fileName.trim() || "worldforge-import.tar";
   const entries = readTarEntries(decodeBase64Data(request.base64Data));
   const issues: WorldImportReviewIssue[] = [];
@@ -98,7 +119,11 @@ export async function reviewImportPackage(
 
   for (const entry of entries) {
     if (entryPaths.has(entry.path)) {
-      issues.push(issue(`duplicate-path-${entry.path}`, "duplicate_entry_path", "error", "Package contains duplicate entry paths.", { path: entry.path }));
+      issues.push(
+        issue(`duplicate-path-${entry.path}`, "duplicate_entry_path", "error", "Package contains duplicate entry paths.", {
+          path: entry.path,
+        }),
+      );
       continue;
     }
     entryPaths.add(entry.path);
@@ -124,9 +149,10 @@ export async function reviewImportPackage(
   const existingDocuments = await store.loadEntityDocuments();
   const existingIds = new Set(existingDocuments.map((document) => document.envelope.id));
   const existingPaths = new Set(existingDocuments.map((document) => normalizeArchivePath(path.relative(worldRoot, document.path))));
-  const mediaEntryPaths = new Set(entries.filter((entry) => entry.path.startsWith("media/")).map((entry) => entry.path));
+  const mediaEntries = entries.filter((entry) => entry.path.startsWith("media/"));
+  const mediaEntryPaths = new Set(mediaEntries.map((entry) => entry.path));
 
-  const packageDocuments: EntityDocument[] = [];
+  const packageDocuments: ImportPackageDocument[] = [];
   const packageIds = new Set<string>();
   let validMediaCount = 0;
 
@@ -143,11 +169,11 @@ export async function reviewImportPackage(
         }
 
         const document = parseEntityDocument(path.join(worldRoot, entry.path), source);
-        packageDocuments.push(document);
+        packageDocuments.push({ entryPath: entry.path, source, document });
 
         if (packageIds.has(document.envelope.id)) {
           issues.push(
-            issue(`duplicate-id-${document.envelope.id}-${entry.path}`, "duplicate_entity_id", "error", "Entity id conflicts with an existing or duplicated document.", {
+            issue(`duplicate-id-${document.envelope.id}-${entry.path}`, "duplicate_entity_id", "error", "Entity id conflicts with another document in the package.", {
               entityId: document.envelope.id,
               path: entry.path,
             }),
@@ -199,13 +225,13 @@ export async function reviewImportPackage(
     issues.push(issue(`unsupported-${entry.path}`, "unsupported_entry", "warning", "Package contains an unsupported non-export entry.", { path: entry.path }));
   }
 
-  for (const document of packageDocuments) {
-    for (const asset of document.envelope.media) {
+  for (const packageDocument of packageDocuments) {
+    for (const asset of packageDocument.document.envelope.media) {
       const assetPath = normalizeArchivePath(asset.path);
       if (!mediaEntryPaths.has(assetPath)) {
         issues.push(
-          issue(`missing-media-${document.envelope.id}-${assetPath}`, "media_missing", "error", "Document references media that is missing from the package.", {
-            entityId: document.envelope.id,
+          issue(`missing-media-${packageDocument.document.envelope.id}-${assetPath}`, "media_missing", "error", "Document references media that is missing from the package.", {
+            entityId: packageDocument.document.envelope.id,
             path: assetPath,
           }),
         );
@@ -214,22 +240,40 @@ export async function reviewImportPackage(
   }
 
   const validDocumentCount = packageDocuments.filter((document) => {
-    const hasError = issues.some(
-      (entry) =>
-        entry.severity === "error" &&
-        ((entry.entityId && entry.entityId === document.envelope.id) || (entry.path && entry.path === normalizeArchivePath(path.relative(worldRoot, document.path)))),
-    );
+    const hasError = issues.some((entry) => entry.severity === "error" && issueTargetsDocument(entry, document, worldRoot));
     return !hasError;
   }).length;
 
   return {
-    status: "ready",
-    summary: summaryFor(validDocumentCount, validMediaCount, issues),
     fileName,
     packageKind: manifest?.packageKind === "worldforge-export" ? "worldforge-export" : "unknown",
+    entries,
+    documents: packageDocuments,
+    mediaEntries,
+    issues: issues.sort((left, right) => left.message.localeCompare(right.message) || (left.path ?? "").localeCompare(right.path ?? "")),
     validDocumentCount,
     validMediaCount,
-    issueCount: issues.length,
-    issues: issues.sort((left, right) => left.message.localeCompare(right.message) || (left.path ?? "").localeCompare(right.path ?? "")),
+  };
+}
+
+export async function reviewImportPackage(
+  worldRoot: string,
+  viewer: AuthenticatedViewer,
+  request: WorldImportReviewRequest,
+): Promise<WorldImportReviewPayload> {
+  if (viewer.role !== "owner") {
+    throw new AuthError(403, "Only the owner can review import packages.");
+  }
+  const analysis = await analyzeImportPackage(worldRoot, request);
+
+  return {
+    status: "ready",
+    summary: summaryFor(analysis.validDocumentCount, analysis.validMediaCount, analysis.issues),
+    fileName: analysis.fileName,
+    packageKind: analysis.packageKind,
+    validDocumentCount: analysis.validDocumentCount,
+    validMediaCount: analysis.validMediaCount,
+    issueCount: analysis.issues.length,
+    issues: analysis.issues,
   };
 }

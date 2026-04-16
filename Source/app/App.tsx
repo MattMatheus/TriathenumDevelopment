@@ -19,6 +19,7 @@ import type {
   WorldEditorSummarySuggestion,
   WorldEntityDraftPayload,
   WorldGraphPayload,
+  WorldImportApplyPayload,
   WorldImportReviewPayload,
   WorldMapNavigationPayload,
   WorldSearchMode,
@@ -298,6 +299,9 @@ export function App() {
   const [isExportingWorld, setIsExportingWorld] = useState(false);
   const [importReview, setImportReview] = useState<WorldImportReviewPayload | null>(null);
   const [isReviewingImport, setIsReviewingImport] = useState(false);
+  const [importApplyResult, setImportApplyResult] = useState<WorldImportApplyPayload | null>(null);
+  const [isApplyingImport, setIsApplyingImport] = useState(false);
+  const [lastImportPackage, setLastImportPackage] = useState<{ fileName: string; base64Data: string } | null>(null);
   const canManageAISettings = session?.viewer.role === "owner";
 
   async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
@@ -1105,6 +1109,7 @@ export function App() {
   async function handleReviewImportPackage(file: File) {
     setError(null);
     setIsReviewingImport(true);
+    setImportApplyResult(null);
 
     try {
       const base64Data = await new Promise<string>((resolve, reject) => {
@@ -1132,10 +1137,50 @@ export function App() {
 
       const payload = (await response.json()) as WorldImportReviewPayload;
       setImportReview(payload);
+      setLastImportPackage({
+        fileName: file.name,
+        base64Data,
+      });
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
       setIsReviewingImport(false);
+    }
+  }
+
+  async function handleApplyImportPackage() {
+    if (!lastImportPackage) {
+      setError("Review a package first before applying it.");
+      return;
+    }
+
+    setError(null);
+    setIsApplyingImport(true);
+
+    try {
+      const response = await apiFetch("/api/world/import-apply", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          ...lastImportPackage,
+          conflictPolicy: "skip_on_conflict",
+        }),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error ?? "Unable to apply the import package.");
+      }
+
+      const payload = (await response.json()) as WorldImportApplyPayload;
+      setImportApplyResult(payload);
+      setRefreshVersion((current) => current + 1);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setIsApplyingImport(false);
     }
   }
 
@@ -2543,6 +2588,32 @@ export function App() {
                   ) : (
                     <p className="placeholder">No issues detected in the reviewed package.</p>
                   )}
+                  <div className="editor-actions">
+                    <button type="button" onClick={handleApplyImportPackage} disabled={isApplyingImport}>
+                      {isApplyingImport ? "Applying..." : "Apply With Skip-On-Conflict"}
+                    </button>
+                  </div>
+                  {importApplyResult ? (
+                    <div className="stack">
+                      <p className="placeholder">{importApplyResult.summary}</p>
+                      <p className="placeholder">
+                        Created: {importApplyResult.createdCount} • Skipped: {importApplyResult.skippedCount} • Failed: {importApplyResult.failedCount}
+                      </p>
+                      <ul className="sources">
+                        {importApplyResult.actions.map((action) => (
+                          <li key={action.id}>
+                            <div className="section-row">
+                              <strong>{action.targetType}</strong>
+                              <span className="queue-count">{action.kind}</span>
+                            </div>
+                            <p>{action.message}</p>
+                            <p className="path-copy">{action.path}</p>
+                            {action.entityId ? <p className="path-copy">{action.entityId}</p> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <p className="placeholder">{isReviewingImport ? "Reviewing import package..." : "Upload an export-shaped package to inspect it without writing world files."}</p>
